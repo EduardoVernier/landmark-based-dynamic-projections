@@ -10,6 +10,8 @@ scikit-learn = "*"
 scipy = "*"
 matplotlib = "*"
 theano = "*"
+opencv-python = "*"
+pandas = "*"
 
 [requires]
 python_version = "3.5"
