@@ -12,9 +12,9 @@ from core import find_sigma
 def movement_penalty(Ys, N):
     penalties = []
     for t in range(len(Ys) - 1):
-        penalties.append(T.sum((Ys[t] - Ys[t + 1])**2))
+        penalties.append(T.sum((Ys[t] - Ys[t + 1]) ** 2))
 
-    return T.sum(penalties)/(2*N)
+    return T.sum(penalties) / (2 * N)
 
 
 def find_Ys(Xs_shared, Ys_shared, sigmas_shared, N, steps, output_dims,
@@ -54,7 +54,7 @@ def find_Ys(Xs_shared, Ys_shared, sigmas_shared, N, steps, output_dims,
     for t in range(steps):
         c_vars.append(cost_var(Xvars[t], Yvars[t], sigmas_vars[t], metric))
 
-    cost = T.sum(c_vars) + lmbda_var*movement_penalty(Yvars, N)
+    cost = T.sum(c_vars) + lmbda_var * movement_penalty(Yvars, N)
 
     # Setting update for Ys velocities
     grad_Y = T.grad(cost, Yvars)
@@ -63,7 +63,7 @@ def find_Ys(Xs_shared, Ys_shared, sigmas_shared, N, steps, output_dims,
               lmbda_var: lmbda_shared}
     updates = []
     for t in range(steps):
-        updates.append((Yvs_shared[t], momentum*Yv_vars[t] - lr*grad_Y[t]))
+        updates.append((Yvs_shared[t], momentum * Yv_vars[t] - lr * grad_Y[t]))
 
         givens[Xvars[t]] = Xs_shared[t]
         givens[Yvars[t]] = Ys_shared[t]
@@ -188,13 +188,14 @@ def dynamic_tsne(Xs, perplexity=30, Ys=None, output_dims=2, n_epochs=1000,
 
     if Ys is None:
         Y = random_state.normal(0, init_stdev, size=(N, output_dims))
-        Ys = [Y]*steps
+        Ys = [Y] * steps
 
     for t in range(steps):
         if Xs[t].shape[0] != N or Ys[t].shape[0] != N:
             raise Exception('Invalid datasets.')
 
         Xs[t] = np.array(Xs[t], dtype=floath)
+
 
     Xs_shared, Ys_shared, sigmas_shared = [], [], []
     for t in range(steps):
@@ -214,3 +215,60 @@ def dynamic_tsne(Xs, perplexity=30, Ys=None, output_dims=2, n_epochs=1000,
                  metric, verbose)
 
     return Ys
+
+
+def landmark_dtsne(Xs, lX, lY, perplexity=30, Ys=None, output_dims=2, n_epochs=1000,
+                   initial_lr=2400, final_lr=200, lr_switch=250, init_stdev=1e-4,
+                   sigma_iters=50, initial_momentum=0.5, final_momentum=0.8,
+                   momentum_switch=250, lmbda=0.0, metric='euclidean',
+                   random_state=None, verbose=1):
+
+    random_state = check_random_state(random_state)
+
+    steps = len(Xs)
+    N = Xs[0].shape[0]
+    N_landmarks = len(lX)
+    lX = np.array(lX, dtype=floath)
+
+    # Initialize Ys
+    if Ys is None:
+        Y = random_state.normal(0, init_stdev, size=(N, output_dims))
+
+        Ys = [Y] * steps
+
+    for t in range(steps):
+        if Xs[t].shape[0] != N or Ys[t].shape[0] != N:
+            raise Exception('Invalid datasets.')
+        Xs[t] = np.array(Xs[t], dtype=floath)
+
+
+    # Compute sigmas
+    Xs_shared, Ys_shared, sigmas_shared, landmark_sigmas = [], [], [], []
+    for t in range(steps):
+        X_with_landmarks = np.append(Xs[t], lX, axis=0)
+        X_shared = theano.shared(X_with_landmarks)
+        sigma_shared = theano.shared(np.ones(N + N_landmarks, dtype=floath))
+
+        # X_shared = theano.shared(Xs[t])
+        # sigma_shared = theano.shared(np.ones(N, dtype=floath))
+
+        find_sigma(X_shared, sigma_shared, N + N_landmarks, perplexity, sigma_iters,
+                   metric=metric, verbose=verbose)
+
+        Xs_shared.append(theano.shared(Xs[t]))
+        Ys_shared.append(theano.shared(np.array(Ys[t], dtype=floath)))
+        sigmas_shared.append(sigma_shared[:N])
+        landmark_sigmas.append(sigma_shared[N:])
+
+
+    return
+
+# Y = random_state.normal(loc=[np.average(lY[:,i]) for i in range(output_dims)],
+#                         scale=[np.std(lY[:,i]) for i in range(output_dims)],
+#                         size=(N, output_dims))
+
+#
+# import matplotlib.pyplot as plt;
+# plt.plot(Y[:, 0], Y[:, 1], 'ro');
+# plt.plot(lY[:, 0], lY[:, 1], 'bo');
+# plt.show()

@@ -12,6 +12,7 @@ matplotlib = "*"
 theano = "*"
 opencv-python = "*"
 pandas = "*"
+natsort = "*"
 
 [requires]
 python_version = "3.5"

@@ -20,7 +20,7 @@ def load_drawings(base_path):
     drawing_t = []
     X_index = []
 
-    print(sorted(categories))
+    # print(sorted(categories))
     for cat_i, cat in enumerate(sorted(categories)):
         CATEGORIES[cat_i] = cat  # Maps a int to a string
         paths = glob.glob(base_path + cat + '-*')
