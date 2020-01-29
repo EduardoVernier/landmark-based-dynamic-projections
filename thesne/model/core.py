@@ -13,6 +13,10 @@ def sqeuclidean_var(X):
     ss = (X ** 2).sum(axis=1)
     return ss.reshape((N, 1)) + ss.reshape((1, N)) - 2*X.dot(X.T)
 
+# L
+def landmark_euclidean_var(X, Y):
+    return (X ** 2).sum(1).reshape((X.shape[0], 1)) + (Y ** 2).sum(1).reshape((1, Y.shape[0])) - 2 * X.dot(Y.T)
+
 
 def p_Xp_given_X_var(X, sigma, metric):
     N = X.shape[0]
@@ -31,6 +35,33 @@ def p_Xp_given_X_var(X, sigma, metric):
 
     return esqdistance_zd/row_sum  # Possibly dangerous
 
+# L
+def landmark_p_Xp_given_X_var(X, sigma, lX, lsigma, metric):
+
+    if metric == 'euclidean':
+        # sqdistance = sqeuclidean_var(X)
+        distance = landmark_euclidean_var(X, lX)
+    elif metric == 'precomputed':
+        distance = X**2
+    else:
+        raise Exception('Invalid metric')
+
+    N = X.shape[0]
+    N_landmarks = lX.shape[0]
+
+    # p_i|j - using normal point sigmas
+    distance_x_sigma = T.exp(-distance / ((2 * (sigma ** 2)).reshape((N, 1))))
+    row_sum = T.sum(distance_x_sigma, axis=1).reshape((N, 1)) - distance_x_sigma
+    p_i_j = distance_x_sigma / row_sum
+
+    # p_j|i - using landmark sigmas
+    distance_lx_sigma = T.exp(-distance.T / ((2 * (lsigma ** 2)).reshape((lX.shape[0], 1)))).T
+    row_l_sum = T.sum(distance_lx_sigma, axis=1).reshape((N, 1)) - distance_lx_sigma
+    p_j_i = distance_lx_sigma / row_l_sum
+
+    avg_p = (p_i_j + p_j_i) / (2 * (N + N_landmarks))
+    return avg_p
+
 
 def p_Xp_X_var(p_Xp_given_X):
     return (p_Xp_given_X + p_Xp_given_X.T) / (2 * p_Xp_given_X.shape[0])
@@ -41,12 +72,31 @@ def p_Yp_Y_var(Y):
     one_over = T.fill_diagonal(1/(sqdistance + 1), 0)
     return one_over/one_over.sum()  # Possibly dangerous
 
+# L
+def landmark_p_Yp_Y_var(Y, lY):
+    N = Y.shape[0]
+    distance = landmark_euclidean_var(Y, lY)
+    t_distances = 1 / (distance + 1)
+    row_sum = T.sum(t_distances, axis=1).reshape((N, 1)) - t_distances
+    q_i_j = t_distances / row_sum
+    return q_i_j
+
     
 def cost_var(X, Y, sigma, metric):
     p_Xp_given_X = p_Xp_given_X_var(X, sigma, metric)
     PX = p_Xp_X_var(p_Xp_given_X)
     PY = p_Yp_Y_var(Y)
     
+    PXc = T.maximum(PX, epsilon)
+    PYc = T.maximum(PY, epsilon)
+    return T.sum(PX * T.log(PXc / PYc))  # Possibly dangerous (clipped)
+
+# L
+def landmark_cost_var(X, Y, sigma, lX, lY, lsigma, metric):
+    PX = landmark_p_Xp_given_X_var(X, sigma, lX, lsigma, metric)
+    # PX = p_Xp_X_var(p_Xp_given_X)
+    PY = landmark_p_Yp_Y_var(Y, lY)
+
     PXc = T.maximum(PX, epsilon)
     PYc = T.maximum(PY, epsilon)
     return T.sum(PX * T.log(PXc / PYc))  # Possibly dangerous (clipped)
@@ -65,7 +115,7 @@ def find_sigma(X_shared, sigma_shared, N, perplexity, sigma_iters,
     entropy = -T.sum(P*T.log(P), axis=1)
 
     # Setting update for binary search interval
-    sigmin_shared = theano.shared(np.full(N, np.sqrt(epsilon), dtype=floath))
+    sigmin_shared = theano.shared(np.full(N, -np.inf, dtype=floath))
     sigmax_shared = theano.shared(np.full(N, np.inf, dtype=floath))
 
     sigmin = T.fvector('sigmin')

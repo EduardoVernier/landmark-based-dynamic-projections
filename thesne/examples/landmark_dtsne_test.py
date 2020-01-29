@@ -5,15 +5,17 @@ import natsort
 import numpy as np
 import pandas as pd
 from sklearn.utils import check_random_state
+import time
 
-from thesne.model.dynamic_tsne import dynamic_tsne, landmark_dtsne
+from thesne.model.dynamic_tsne import dynamic_tsne
+from thesne.model.landmark_dtsne import landmark_dtsne
 from thesne.examples import plot
 
 from helper import shared
 
 
 def to_csv(Ys, labels, dataset_id, p, l):
-    output_path = '../../output/{}-ldtsne_{}p_{}l.csv'.format(dataset_id, int(p), str(l).replace('.', '-'))
+    output_path = '../../output/{}-ldtsne_{}p_{}l_{}.csv'.format(dataset_id, int(p), str(l).replace('.', '-'), str(int(time.time())))
     try:
         df_out = pd.DataFrame(index=labels)
 
@@ -35,9 +37,6 @@ def to_csv(Ys, labels, dataset_id, p, l):
 
 def main():
     seed = 0
-
-    p = 70
-    l = 0.1
 
     dataset_dir = '../../datasets/fashion/'
     dataset_id = os.path.basename(os.path.dirname(dataset_dir))
@@ -70,12 +69,26 @@ def main():
 
 
     # Ys = dynamic_tsne(Xs, perplexity=p, lmbda=l, verbose=1, n_epochs=10, sigma_iters=10, random_state=seed)
-    Ys = landmark_dtsne(Xs, lX, lY, perplexity=70, lmbda=0.1, verbose=1, sigma_iters=10, random_state=seed)
 
-    # for Y in Ys:
-    #     plot.plot(Y, labels)
+    p = 70
+    # l = 10
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    # to_csv(Ys, labels, dataset_id, p, l)
 
+    l = 0.01
+    Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
     to_csv(Ys, labels, dataset_id, p, l)
+    #
+    # l = 0.1
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    # to_csv(Ys, labels, dataset_id, p, l)
+    #
+    # l = 0.5
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    # to_csv(Ys, labels, dataset_id, p, l)
+
+# for Y in Ys:
+#     plot.plot(Y, labels)
 
 
 if __name__ == "__main__":
