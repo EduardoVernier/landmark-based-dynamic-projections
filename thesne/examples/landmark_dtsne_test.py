@@ -38,8 +38,9 @@ def to_csv(Ys, labels, dataset_id, p, l):
 def main():
     seed = 0
 
-    dataset_dir = '../../datasets/fashion/'
-    dataset_id = os.path.basename(os.path.dirname(dataset_dir))
+    dataset_id = 'quickdraw'
+    dataset_dir = '../../datasets/{}/'.format(dataset_id)
+    # dataset_id = os.path.basename(os.path.dirname(dataset_dir))
 
     # Read dataset
     Xs = []
@@ -63,29 +64,36 @@ def main():
 
 
     # Read landmarks
-    df = pd.read_csv('../../landmarking/output/fashion_krandom_1000_PCA.csv', index_col=0)
+    df = pd.read_csv('../../landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
+    Xs = [Xs[0]]
 
 
     # Ys = dynamic_tsne(Xs, perplexity=p, lmbda=l, verbose=1, n_epochs=10, sigma_iters=10, random_state=seed)
 
     p = 70
-    # l = 10
-    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    l = 0.0
+    Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, n_epochs=100, random_state=seed)
+    to_csv(Ys, labels, dataset_id, p, l)
+
+    # #
+    # l = 0.01
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, n_epochs=100, random_state=seed)
     # to_csv(Ys, labels, dataset_id, p, l)
 
-    l = 0.01
-    Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
-    to_csv(Ys, labels, dataset_id, p, l)
-    #
     # l = 0.1
-    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, n_epochs=100, random_state=seed)
+    # to_csv(Ys, labels, dataset_id, p, l)
+
+    # l = 0.5
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, n_epochs=100, random_state=seed)
     # to_csv(Ys, labels, dataset_id, p, l)
     #
-    # l = 0.5
-    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, sigma_iters=50, n_epochs=50, random_state=seed)
+    # l = 1.0
+    # Ys = landmark_dtsne(Xs, lX, lY, perplexity=p, lmbda=l, verbose=1, n_epochs=100, random_state=seed)
     # to_csv(Ys, labels, dataset_id, p, l)
+
 
 # for Y in Ys:
 #     plot.plot(Y, labels)

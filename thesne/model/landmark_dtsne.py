@@ -6,7 +6,9 @@ from sklearn.utils import check_random_state
 
 from core import floath
 from core import cost_var, landmark_cost_var
-from core import find_sigma
+from core import find_sigma, find_sigma_old
+
+theano.config.exception_verbosity = 'high'
 
 
 
@@ -56,6 +58,8 @@ def find_Ys_with_landmarks(Xs_shared, Ys_shared, sigmas_shared, N, steps, output
 
     # Setting update for Ys velocities
     grad_Y = T.grad(cost, Yvars)
+    # clip = 1
+    # grad_Y = T.grad(theano.gradient.grad_clip(cost, -1 * clip, clip), Yvars)
 
     givens = {lr: lr_shared, momentum: momentum_shared,
               lmbda_var: lmbda_shared}
@@ -103,9 +107,9 @@ def find_Ys_with_landmarks(Xs_shared, Ys_shared, sigmas_shared, N, steps, output
 
 
 def landmark_dtsne(Xs, lX, lY, perplexity=30, Ys=None, output_dims=2, n_epochs=1000,
-                   initial_lr=2400, final_lr=200, lr_switch=250, init_stdev=1e-4,
-                   sigma_iters=50, initial_momentum=0.5, final_momentum=0.8,
-                   momentum_switch=250, lmbda=0.0, metric='euclidean',
+                   initial_lr=2400, final_lr=200, lr_switch=80, init_stdev=1e-4,
+                   initial_momentum=0.5, final_momentum=0.8,
+                   momentum_switch=80, lmbda=0.0, metric='euclidean',
                    random_state=None, verbose=1):
     random_state = check_random_state(random_state)
 
@@ -126,29 +130,39 @@ def landmark_dtsne(Xs, lX, lY, perplexity=30, Ys=None, output_dims=2, n_epochs=1
         Xs[t] = np.array(Xs[t], dtype=floath)
 
     # Compute sigmas
+    # sigmas_lX = find_sigma(lX, perplexity=perplexity)
+
+    # lX_shared = theano.shared(lX)
+    # lX_sigma_shared = theano.shared(np.ones(N_landmarks, dtype=floath))
+    # find_sigma_old(lX_shared, lX_sigma_shared, N_landmarks, perplexity, sigma_iters=50, metric=metric, verbose=verbose)
+
     Xs_shared, Ys_shared, sigmas_shared, landmark_sigmas = [], [], [], []
     for t in range(steps):
-        X_with_landmarks = np.append(Xs[t], lX, axis=0)
-        X_shared = theano.shared(X_with_landmarks)
-        sigma_shared = theano.shared(np.ones(N + N_landmarks, dtype=floath))
+        if verbose:
+            print(t, '/', steps)
 
-        # X_shared = theano.shared(Xs[t])
-        # sigma_shared = theano.shared(np.ones(N, dtype=floath))
+        # X_with_landmarks = np.append(Xs[t], lX, axis=0)
+        # X_shared = theano.shared(X_with_landmarks)
+        # sigma_shared = theano.shared(np.ones(N + N_landmarks, dtype=floath))
 
-        find_sigma(X_shared, sigma_shared, N + N_landmarks, perplexity, sigma_iters,
-                   metric=metric, verbose=verbose)
+        X_shared = theano.shared(Xs[t])
+        sigma_shared = theano.shared(np.ones(N, dtype=floath))
+        find_sigma_old(X_shared, sigma_shared, N, perplexity, sigma_iters=50, metric=metric, verbose=verbose)
+        np.save('old.npy', np.array(sigma_shared.container.data))
 
-        Xs_shared.append(theano.shared(Xs[t]))
-        Ys_shared.append(theano.shared(np.array(Ys[t], dtype=floath)))
-        sigmas_shared.append(sigma_shared[:N])
-        landmark_sigmas.append(sigma_shared[N:])
+        # return 0
 
-    Ys = find_Ys_with_landmarks(Xs_shared, Ys_shared, sigmas_shared, N, steps, output_dims,
-                                lX, lY, landmark_sigmas, N_landmarks,
-                                n_epochs, initial_lr, final_lr, lr_switch, init_stdev,
-                                initial_momentum, final_momentum, momentum_switch, lmbda,
-                                metric, verbose)
-    return Ys
+    #     Xs_shared.append(theano.shared(Xs[t]))
+    #     Ys_shared.append(theano.shared(np.array(Ys[t], dtype=floath)))
+    #     sigmas_shared.append(sigma_shared)
+    #     landmark_sigmas.append(lX_sigma_shared)
+    #
+    # Ys = find_Ys_with_landmarks(Xs_shared, Ys_shared, sigmas_shared, N, steps, output_dims,
+    #                             lX, lY, landmark_sigmas, N_landmarks,
+    #                             n_epochs, initial_lr, final_lr, lr_switch, init_stdev,
+    #                             initial_momentum, final_momentum, momentum_switch, lmbda,
+    #                             metric, verbose)
+    # return Ys
 
 # Y = random_state.normal(loc=[np.average(lY[:,i]) for i in range(output_dims)],
 #                         scale=[np.std(lY[:,i]) for i in range(output_dims)],
