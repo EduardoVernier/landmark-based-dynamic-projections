@@ -176,7 +176,7 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
     (n, d) = X.shape
     initial_momentum = 0.5
     final_momentum = 0.8
-    eta = 1 #500
+    eta = 1  # original value was 500
     min_gain = 0.01
     Y = np.random.randn(n, no_dims)
     dY = np.zeros((n, no_dims))
@@ -187,7 +187,7 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
     P, X_betas = regular_p(X, 1e-5, perplexity)
     P = P + np.transpose(P)
     P = P / np.sum(P)
-    P = P * 4.									# early exaggeration
+    P = P * 4.  # early exaggeration
     P = np.maximum(P, 1e-12)
 
     # Compute betas for L
@@ -196,12 +196,8 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
     # Compute P-matrix between X and L with previously computed beta values
     lP = p_given_L_betas(lX, X, L_betas)
     lP = lP / np.sum(lP)
-    lP = lP * 4.									# early exaggeration
+    lP = lP * 4.  # early exaggeration (forever?) -- if we remove it the points won't fall inside the convex hull
     lP = np.maximum(lP, 1e-12)
-
-    # lP /= 1000.
-    # l = 0.  # Up until the 200th iteration
-
 
     # Run iterations
     for iter in range(max_iter):
@@ -246,39 +242,23 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
         # Stop lying about P-values
         if iter == 100:
             P = P / 4.
-            # lP = lP / 4. # hmmmmmmmm this fucks everything
+            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values are reestablished
 
-        # if iter == 200:
-        #     # Center landmarks on Y bounding box center
-        #     # Move landmarks to 0
-        #
-        #     lY[:, 0] = lY[:, 0] - (max(lY[:, 0]) - min(lY[:, 0])) / 2
-        #     lY[:, 1] = lY[:, 1] - (max(lY[:, 1]) - min(lY[:, 1])) / 2
-        #
-        #     # Scale lY and move to Y bb center
-        #     if max(Y[:, 0]) - min(Y[:, 0]) < max(Y[:, 1]) - min(Y[:, 1]):
-        #         scale = (max(Y[:, 0]) - min(Y[:, 0])) / (max(lY[:, 0]) - min(lY[:, 0]))
-        #         # Scale on X
-        #     else:
-        #         scale = (max(Y[:, 1]) - min(Y[:, 1])) / (max(lY[:, 1]) - min(lY[:, 1]))
-        #
-        #     lY = lY * scale
-        #     lY[:, 0] += (max(Y[:, 0]) - min(Y[:, 0])) / 2
-        #     lY[:, 1] += (max(Y[:, 1]) - min(Y[:, 1])) / 2
+        # if (iter + 1) % 50 == 0:
+        #     fig, ax = plt.subplots()
+        #     ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
+        #     ax.set_title(title)
+        #     for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
+        #         # print(a)
+        #         line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=2, color='black', alpha=.3, axes=ax)
+        #         ax.add_line(line)
+        #     ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
+        #     ax.set_aspect('equal')
+        #     plt.show()
+        #     plt.close(1)
+        #     fig.savefig('./landmark-dtsne/{}'.format(title))
 
-        if (iter + 1) % 10 == 0:
-            fig, ax = plt.subplots()
-            ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
-            ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
-            ax.set_title(title)
-            for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lPQ, axis=1)]):
-                # print(a)
-                line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=2, color='black', alpha=.3, axes=ax)
-                ax.add_line(line)
-            ax.set_aspect('equal')
-            plt.show()
-            # fig.savefig('./landmark-dtsne/{}'.format(title))
-    return Y, lY
+    return Y, lY, lP
 
 
 if __name__ == "__main__":
@@ -287,7 +267,8 @@ if __name__ == "__main__":
 
     seed = 0
 
-    dataset_id = 'minigaussians'
+    dataset_id = 'sorts'
+    revision = 50
     dataset_dir = './datasets/{}/'.format(dataset_id)
     # dataset_id = os.path.basename(os.path.dirname(dataset_dir))
     print(dataset_id)
@@ -317,27 +298,31 @@ if __name__ == "__main__":
 
             Xs.append(df.values)
 
-    X = Xs[9]
+    X = Xs[revision]
 
     # Read landmarks
-    df = pd.read_csv('./landmarking/output/{}_krandom_100_PCA.csv'.format(dataset_id), index_col=0)
+    df = pd.read_csv('./landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
     p = 30
-    for l in [.001, .01, .1, .5, .7, .9, 1.]:
-    # for l in [1.]:
+    for l in [.001, .01, .1, .3, .5, .7, .9, 1.]:
+    # for l in [.3]:
         l_str = '{:.4f}'.format(l)
         title = '{}-p{}-l{}.png'.format(dataset_id, p, l_str.replace('.','_'))
         print(title)
 
-        Y, lY = ldtsne(X, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=300)
+        Y, lY, lP = ldtsne(X, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=1000)
 
         fig, ax = plt.subplots()
-        ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
-        ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
+        ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
         ax.set_title(title)
+        max_dist = max(Y[:,0]) - min(Y[:,0])  # bad
+        for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
+            alpha = np.sqrt(np.linalg.norm([a,b])) / max_dist
+            line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=1, color='silver', alpha=alpha, axes=ax, zorder=0)
+            ax.add_line(line)
+        ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3, zorder=2)
         ax.set_aspect('equal')
         plt.show()
         fig.savefig('./landmark-dtsne/{}'.format(title))
-
