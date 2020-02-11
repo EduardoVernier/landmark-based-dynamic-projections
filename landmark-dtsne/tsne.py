@@ -12,13 +12,14 @@
 #  Created by Laurens van der Maaten on 20-12-08.
 #  Copyright (c) 2008 Tilburg University. All rights reserved.
 
-import pylab
-import glob
 
-import natsort
 import numpy as np
 import pandas as pd
+import glob
+import natsort
+import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from matplotlib import lines
 
 from helper import shared
 
@@ -66,11 +67,13 @@ def p_given_L_betas(lX, X, beta):
             print("Computing P-values for point %d of %d..." % (i, n))
 
         # Compute the Gaussian kernel and entropy for the current precision
-        Di = D[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))]
+        # Di = D[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))]
+        Di = D[i, :]
         (H, thisP) = Hbeta(Di, beta[i])
 
         # Set the final row of P
-        P[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))] = thisP
+        # P[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))] = thisP
+        P[i, :] = thisP
 
     # Return final P-matrix
     return P
@@ -153,7 +156,7 @@ def pca(X=np.array([]), no_dims=50):
     return Y
 
 
-def tsne(X=np.array([]), lX=np.array([]), lY=np.array([]), no_dims=2, initial_dims=50, perplexity=30.0, max_iter=1000):
+def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=2, initial_dims=50, perplexity=30.0, max_iter=1000):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
@@ -173,7 +176,7 @@ def tsne(X=np.array([]), lX=np.array([]), lY=np.array([]), no_dims=2, initial_di
     (n, d) = X.shape
     initial_momentum = 0.5
     final_momentum = 0.8
-    eta = 500
+    eta = 1 #500
     min_gain = 0.01
     Y = np.random.randn(n, no_dims)
     dY = np.zeros((n, no_dims))
@@ -191,26 +194,36 @@ def tsne(X=np.array([]), lX=np.array([]), lY=np.array([]), no_dims=2, initial_di
     _, L_betas = regular_p(lX, 1e-5, perplexity)
 
     # Compute P-matrix between X and L with previously computed beta values
-    Pxl = p_given_L_betas(lX, X, L_betas)
+    lP = p_given_L_betas(lX, X, L_betas)
+    lP = lP / np.sum(lP)
+    lP = lP * 4.									# early exaggeration
+    lP = np.maximum(lP, 1e-12)
 
+    # lP /= 1000.
+    # l = 0.  # Up until the 200th iteration
 
 
     # Run iterations
     for iter in range(max_iter):
 
         # Compute pairwise affinities
-        sum_Y = np.sum(np.square(Y), 1)
-        num = -2. * np.dot(Y, Y.T)
-        num = 1. / (1. + np.add(np.add(num, sum_Y).T, sum_Y))
+        num = 1 / (1 + euclidian_distance(Y))
         num[range(n), range(n)] = 0.
         Q = num / np.sum(num)
         Q = np.maximum(Q, 1e-12)
 
+        # Compute pairwise affinities between Y and lY (projected landmarks)
+        l_num = 1 / (1 + euclidian_distance(lY, Y))
+        lQ = l_num / np.sum(l_num)
+        lQ = np.maximum(lQ, 1e-12)
 
-        # Compute gradient
+        # Compute gradient. The second term is what computes "landmark attraction"
         PQ = P - Q
+        lPQ = lP - lQ
         for i in range(n):
-            dY[i, :] = np.sum(np.tile(PQ[:, i] * num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0)
+            dY[i, :] = (1 - lmbda) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
+                          + lmbda  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - lY), 0)
+
 
         # Perform the update
         if iter < 20:
@@ -226,26 +239,58 @@ def tsne(X=np.array([]), lX=np.array([]), lY=np.array([]), no_dims=2, initial_di
 
         # Compute current value of cost function
         if (iter + 1) % 10 == 0:
-            C = np.sum(P * np.log(P / Q))
-            print("Iteration %d: error is %f" % (iter + 1, C))
+            C = (1 - lmbda) * np.sum(P * np.log(P / Q))
+            lC = lmbda * np.sum(lP * np.log(lP / lQ))
+            print("Iteration {}: error is local={}  global={}".format(iter + 1, C, lC))
 
         # Stop lying about P-values
         if iter == 100:
             P = P / 4.
+            # lP = lP / 4. # hmmmmmmmm this fucks everything
 
-    # Return solution
-    return Y
+        # if iter == 200:
+        #     # Center landmarks on Y bounding box center
+        #     # Move landmarks to 0
+        #
+        #     lY[:, 0] = lY[:, 0] - (max(lY[:, 0]) - min(lY[:, 0])) / 2
+        #     lY[:, 1] = lY[:, 1] - (max(lY[:, 1]) - min(lY[:, 1])) / 2
+        #
+        #     # Scale lY and move to Y bb center
+        #     if max(Y[:, 0]) - min(Y[:, 0]) < max(Y[:, 1]) - min(Y[:, 1]):
+        #         scale = (max(Y[:, 0]) - min(Y[:, 0])) / (max(lY[:, 0]) - min(lY[:, 0]))
+        #         # Scale on X
+        #     else:
+        #         scale = (max(Y[:, 1]) - min(Y[:, 1])) / (max(lY[:, 1]) - min(lY[:, 1]))
+        #
+        #     lY = lY * scale
+        #     lY[:, 0] += (max(Y[:, 0]) - min(Y[:, 0])) / 2
+        #     lY[:, 1] += (max(Y[:, 1]) - min(Y[:, 1])) / 2
+
+        if (iter + 1) % 10 == 0:
+            fig, ax = plt.subplots()
+            ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
+            ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
+            ax.set_title(title)
+            for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lPQ, axis=1)]):
+                # print(a)
+                line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=2, color='black', alpha=.3, axes=ax)
+                ax.add_line(line)
+            ax.set_aspect('equal')
+            plt.show()
+            # fig.savefig('./landmark-dtsne/{}'.format(title))
+    return Y, lY
 
 
 if __name__ == "__main__":
     print("Run Y = tsne.tsne(X, no_dims, perplexity) to perform t-SNE on your dataset.")
-    print("Running example on 2,500 MNIST digits...")
+    # print("Running example on 2,500 MNIST digits...")
 
     seed = 0
 
-    dataset_id = 'fashion'
+    dataset_id = 'minigaussians'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     # dataset_id = os.path.basename(os.path.dirname(dataset_dir))
+    print(dataset_id)
 
     # Read dataset
     Xs = []
@@ -274,16 +319,25 @@ if __name__ == "__main__":
 
     X = Xs[9]
 
-
-
     # Read landmarks
-    df = pd.read_csv('./landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
+    df = pd.read_csv('./landmarking/output/{}_krandom_100_PCA.csv'.format(dataset_id), index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
-    # X = np.loadtxt("./landmark-dtsne/mnist2500_X.txt")
-    # labels = np.loadtxt("./landmark-dtsne/mnist2500_labels.txt")
-    Y = tsne(X, lX, lY, no_dims=2, perplexity=30.0, max_iter=400)
-    pylab.scatter(Y[:, 0], Y[:, 1], 30, labels, cmap=cm.Set1)
-    pylab.scatter(lY[:, 0], lY[:, 1], 30, c='k')
-    pylab.show()
+    p = 30
+    for l in [.001, .01, .1, .5, .7, .9, 1.]:
+    # for l in [1.]:
+        l_str = '{:.4f}'.format(l)
+        title = '{}-p{}-l{}.png'.format(dataset_id, p, l_str.replace('.','_'))
+        print(title)
+
+        Y, lY = ldtsne(X, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=300)
+
+        fig, ax = plt.subplots()
+        ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
+        ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
+        ax.set_title(title)
+        ax.set_aspect('equal')
+        plt.show()
+        fig.savefig('./landmark-dtsne/{}'.format(title))
+
