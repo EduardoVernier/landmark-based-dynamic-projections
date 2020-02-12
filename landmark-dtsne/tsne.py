@@ -15,18 +15,18 @@
 
 import numpy as np
 import pandas as pd
-import glob
-import natsort
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib import lines
 
-from helper import shared
+import shared
+
 
 def euclidian_distance(X, Y=None):
     if type(Y) is not np.ndarray:
         Y = X
     return (X ** 2).sum(1).reshape((X.shape[0], 1)) + (Y ** 2).sum(1).reshape((1, Y.shape[0])) - 2 * X.dot(Y.T)
+
 
 def Hbeta(D=np.array([]), beta=1.0):
     """
@@ -86,7 +86,6 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
         Instead of testing different sigma values, we test different beta values where
         Beta = np.sqrt(1 / beta)
     """
-
     # Initialize some variables
     print("Computing pairwise distances...")
     (n, d) = X.shape
@@ -147,7 +146,6 @@ def pca(X=np.array([]), no_dims=50):
         Runs PCA on the NxD array X in order to reduce its dimensionality to
         no_dims dimensions.
     """
-
     print("Preprocessing the data using PCA...")
     (n, d) = X.shape
     X = X - np.tile(np.mean(X, 0), (n, 1))
@@ -156,7 +154,7 @@ def pca(X=np.array([]), no_dims=50):
     return Y
 
 
-def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=2, initial_dims=50, perplexity=30.0, max_iter=1000):
+def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=2, initial_dims=50, perplexity=30.0, max_iter=1000):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
@@ -178,10 +176,16 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
     final_momentum = 0.8
     eta = 1  # original value was 500
     min_gain = 0.01
-    Y = np.random.randn(n, no_dims)
     dY = np.zeros((n, no_dims))
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
+    if Y_init is None:
+        Y = np.random.randn(n, no_dims)
+        first_revision = True
+    else:
+        Y = Y_init
+        first_revision = False
+
 
     # Compute P-values and betas for X
     P, X_betas = regular_p(X, 1e-5, perplexity)
@@ -242,21 +246,7 @@ def ldtsne(X=np.array([]), lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=
         # Stop lying about P-values
         if iter == 100:
             P = P / 4.
-            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values are reestablished
-
-        # if (iter + 1) % 50 == 0:
-        #     fig, ax = plt.subplots()
-        #     ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k')
-        #     ax.set_title(title)
-        #     for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
-        #         # print(a)
-        #         line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=2, color='black', alpha=.3, axes=ax)
-        #         ax.add_line(line)
-        #     ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3)
-        #     ax.set_aspect('equal')
-        #     plt.show()
-        #     plt.close(1)
-        #     fig.savefig('./landmark-dtsne/{}'.format(title))
+            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values for lP are reestablished
 
     return Y, lY, lP
 
@@ -267,38 +257,13 @@ if __name__ == "__main__":
 
     seed = 0
 
-    dataset_id = 'sorts'
-    revision = 50
+    dataset_id = 'walk'
+    # revision = 50
     dataset_dir = './datasets/{}/'.format(dataset_id)
-    # dataset_id = os.path.basename(os.path.dirname(dataset_dir))
     print(dataset_id)
 
     # Read dataset
-    Xs = []
-    labels = []
-    if 'quickdraw' in dataset_dir or 'fashion' in dataset_dir or 'faces' in dataset_dir:
-        X, info_df, n_revisions, CATEGORIES = shared.load_drawings(dataset_dir + '/')
-        N = len(X)
-        X_flat = np.reshape(np.ravel(X), (N, -1))
-        for t, df in info_df.groupby('t'):
-            df = df.sort_values(['drawing_cat_id', 'drawing_id'])
-            if len(labels) == 0:
-                labels = df['drawing_cat_str'].str.cat(df['drawing_id'].astype(str), sep='-')
-            Xs.append(X_flat[df.X_index])
-
-        labels = pd.factorize(df['drawing_cat_str'])[0]
-    else:
-        csvs = natsort.natsorted(glob.glob(dataset_dir + '/*'))
-        for csv in csvs:
-            df = pd.read_csv(csv, index_col=0)
-            if len(labels) == 0:
-                # labels = df.index
-                labels = df.index.str.split('-').str[0]
-                labels = pd.factorize(labels)[0]
-
-            Xs.append(df.values)
-
-    X = Xs[revision]
+    Xs, labels = shared.read_dataset(dataset_dir)
 
     # Read landmarks
     df = pd.read_csv('./landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
@@ -306,13 +271,20 @@ if __name__ == "__main__":
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
     p = 30
-    for l in [.001, .01, .1, .3, .5, .7, .9, 1.]:
-    # for l in [.3]:
+    l = 0.0
+    Y = None
+    xlims = ylims = None
+    for revision in range(len(Xs)):
+        X = Xs[revision]
         l_str = '{:.4f}'.format(l)
-        title = '{}-p{}-l{}.png'.format(dataset_id, p, l_str.replace('.','_'))
+        title = '{}-p{}-l{}-rev{}.png'.format(dataset_id, p, l_str.replace('.','_'), revision)
         print(title)
 
-        Y, lY, lP = ldtsne(X, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=1000)
+        Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=1000)
+
+        if xlims is None:
+            xlims = (min(Y[:,0]), max(Y[:,0]))
+            ylims = (min(Y[:,1]), max(Y[:,1]))
 
         fig, ax = plt.subplots()
         ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
@@ -324,5 +296,7 @@ if __name__ == "__main__":
             ax.add_line(line)
         ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3, zorder=2)
         ax.set_aspect('equal')
+        ax.set_xlim(xlims)
+        ax.set_ylim(ylims)
         plt.show()
         fig.savefig('./landmark-dtsne/{}'.format(title))

@@ -4,9 +4,8 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import sys
 import os
-import matplotlib.pyplot as plt
 
-from helper import shared
+import shared
 
 ## USAGE: python k_random.py <dataset_path> <k_samples> <method>
 ## ../datasets/qtables/ 1000 PCA
