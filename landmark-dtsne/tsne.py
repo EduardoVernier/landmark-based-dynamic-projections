@@ -12,7 +12,7 @@
 #  Created by Laurens van der Maaten on 20-12-08.
 #  Copyright (c) 2008 Tilburg University. All rights reserved.
 
-
+import itertools
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -141,20 +141,7 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
     return P, beta
 
 
-def pca(X=np.array([]), no_dims=50):
-    """
-        Runs PCA on the NxD array X in order to reduce its dimensionality to
-        no_dims dimensions.
-    """
-    print("Preprocessing the data using PCA...")
-    (n, d) = X.shape
-    X = X - np.tile(np.mean(X, 0), (n, 1))
-    (l, M) = np.linalg.eig(np.dot(X.T, X))
-    Y = np.dot(X, M[:, 0:no_dims])
-    return Y
-
-
-def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, no_dims=2, initial_dims=50, perplexity=30.0, max_iter=1000):
+def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, global_exaggeration=4, no_dims=2, perplexity=30.0, max_iter=1000):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
@@ -186,7 +173,6 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         Y = Y_init
         first_revision = False
 
-
     # Compute P-values and betas for X
     P, X_betas = regular_p(X, 1e-5, perplexity)
     P = P + np.transpose(P)
@@ -200,7 +186,7 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
     # Compute P-matrix between X and L with previously computed beta values
     lP = p_given_L_betas(lX, X, L_betas)
     lP = lP / np.sum(lP)
-    lP = lP * 4.  # early exaggeration (forever?) -- if we remove it the points won't fall inside the convex hull
+    lP = lP * global_exaggeration  # early exaggeration (forever?) -- if we remove it the points won't fall inside the convex hull
     lP = np.maximum(lP, 1e-12)
 
     # Run iterations
@@ -246,7 +232,7 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         # Stop lying about P-values
         if iter == 100:
             P = P / 4.
-            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values for lP are reestablished
+            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values for lP are reestablished -- global exaggeration
 
     return Y, lY, lP
 
@@ -257,46 +243,59 @@ if __name__ == "__main__":
 
     seed = 0
 
-    dataset_id = 'walk'
-    # revision = 50
+    dataset_id = 'fashion'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
     # Read dataset
-    Xs, labels = shared.read_dataset(dataset_dir)
+    Xs, labels, categories = shared.read_dataset(dataset_dir)
 
     # Read landmarks
     df = pd.read_csv('./landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
-    p = 30
-    l = 0.0
-    Y = None
-    xlims = ylims = None
-    for revision in range(len(Xs)):
-        X = Xs[revision]
-        l_str = '{:.4f}'.format(l)
-        title = '{}-p{}-l{}-rev{}.png'.format(dataset_id, p, l_str.replace('.','_'), revision)
-        print(title)
+    perplexity_list = [30]
+    lambda_list = [0., .01, .1, .5, .8,  1.]
+    global_exaggeration_list = [1, 2, 4, 8]
+    param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list)
 
-        Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, no_dims=2, max_iter=1000)
+    for p, l, ge in param_grid:
+        xlims = ylims = None
+        Y = None
+        Ys = []
+        # for revision in range(len(Xs)):
+        for revision in [9]:
+            X = Xs[revision]
+            l_str = '{:1.4f}'.format(l).replace('.', '_')
+            title = '{}-p{}-l{}-ge{}-rev{}'.format(dataset_id, p, l_str, ge, revision)
+            print(title)
 
-        if xlims is None:
-            xlims = (min(Y[:,0]), max(Y[:,0]))
-            ylims = (min(Y[:,1]), max(Y[:,1]))
+            Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=1000)
+            Ys.append(Y)
+            # Generate image for inspection
+            if xlims is None:
+                xlims = (min(Y[:,0]), max(Y[:,0]))
+                ylims = (min(Y[:,1]), max(Y[:,1]))
 
-        fig, ax = plt.subplots()
-        ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
-        ax.set_title(title)
-        max_dist = max(Y[:,0]) - min(Y[:,0])  # bad
-        for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
-            alpha = np.sqrt(np.linalg.norm([a,b])) / max_dist
-            line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=1, color='silver', alpha=alpha, axes=ax, zorder=0)
-            ax.add_line(line)
-        ax.scatter(Y[:, 0], Y[:, 1], 20, labels, cmap=cm.Set3, zorder=2)
-        ax.set_aspect('equal')
-        ax.set_xlim(xlims)
-        ax.set_ylim(ylims)
-        plt.show()
-        fig.savefig('./landmark-dtsne/{}'.format(title))
+            fig, ax = plt.subplots()
+            ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
+            ax.set_title(title)
+            max_dist = max(Y[:,0]) - min(Y[:,0])  # bad
+            for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
+                alpha = np.sqrt(np.linalg.norm([a,b])) / max_dist
+                line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=1, color='silver', alpha=alpha, axes=ax, zorder=0)
+                ax.add_line(line)
+            ax.scatter(Y[:, 0], Y[:, 1], 20, categories, cmap=cm.Set3, zorder=2)
+            ax.set_aspect('equal')
+            ax.set_xlim(xlims)
+            ax.set_ylim(ylims)
+            plt.show()
+            fig.savefig('./landmark-dtsne/{}.png'.format(title))
+
+        df_out = pd.DataFrame(index=labels)
+        for t in range(len(Ys)):
+            df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
+            df_out['t{}d1'.format(t)] = Ys[t].T[1]
+
+        df_out.to_csv('./landmark-dtsne/static-tests/{}.csv'.format(title), index_label='id')

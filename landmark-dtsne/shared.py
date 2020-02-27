@@ -93,16 +93,16 @@ def read_dataset(dataset_dir):
                 labels = df['drawing_cat_str'].str.cat(df['drawing_id'].astype(str), sep='-')
             Xs.append(X_flat[df.X_index])
 
-        labels = pd.factorize(df['drawing_cat_str'])[0]
+        categories = pd.factorize(df['drawing_cat_str'])[0]
     else:
         csvs = natsort.natsorted(glob.glob(dataset_dir + '/*'))
         for csv in csvs:
             df = pd.read_csv(csv, index_col=0)
             if len(labels) == 0:
-                # labels = df.index
-                labels = df.index.str.split('-').str[0]
-                labels = pd.factorize(labels)[0]
+                labels = df.index
+                categories = df.index.str.split('-').str[0]
+                categories = pd.factorize(categories)[0]
 
             Xs.append(df.values)
 
-    return Xs, labels
+    return Xs, labels, categories
