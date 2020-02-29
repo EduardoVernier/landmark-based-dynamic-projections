@@ -13,6 +13,7 @@ theano = "*"
 opencv-python = "*"
 pandas = "*"
 natsort = "*"
+ipykernel = "*"
 
 [requires]
 python_version = "3.5"

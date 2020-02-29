@@ -243,7 +243,7 @@ if __name__ == "__main__":
 
     seed = 0
 
-    dataset_id = 'fashion'
+    dataset_id = 'gaussians'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -251,24 +251,23 @@ if __name__ == "__main__":
     Xs, labels, categories = shared.read_dataset(dataset_dir)
 
     # Read landmarks
-    df = pd.read_csv('./landmarking/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
+    df = pd.read_csv('./generate-landmarks/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
     perplexity_list = [30]
-    lambda_list = [0., .01, .1, .5, .8,  1.]
-    global_exaggeration_list = [1, 2, 4, 8]
+    lambda_list = [.5]
+    global_exaggeration_list = [4]
     param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list)
 
     for p, l, ge in param_grid:
         xlims = ylims = None
         Y = None
         Ys = []
-        # for revision in range(len(Xs)):
-        for revision in [9]:
+        for revision in range(len(Xs)):
             X = Xs[revision]
             l_str = '{:1.4f}'.format(l).replace('.', '_')
-            title = '{}-p{}-l{}-ge{}-rev{}'.format(dataset_id, p, l_str, ge, revision)
+            title = '{}-p{}-l{}-ge{}'.format(dataset_id, p, l_str, ge, revision)
             print(title)
 
             Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=1000)
@@ -291,11 +290,11 @@ if __name__ == "__main__":
             ax.set_xlim(xlims)
             ax.set_ylim(ylims)
             plt.show()
-            fig.savefig('./landmark-dtsne/{}.png'.format(title))
+            # fig.savefig('./landmark-dtsne/{}.png'.format(title))
 
         df_out = pd.DataFrame(index=labels)
         for t in range(len(Ys)):
             df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
             df_out['t{}d1'.format(t)] = Ys[t].T[1]
 
-        df_out.to_csv('./landmark-dtsne/static-tests/{}.csv'.format(title), index_label='id')
+        df_out.to_csv('./tests/dynamic-tests/{}.csv'.format(title), index_label='id')
