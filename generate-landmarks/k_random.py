@@ -4,6 +4,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import sys
 import os
+import matplotlib.pyplot as plt
 
 import shared
 
@@ -15,15 +16,16 @@ k = sys.argv[2]
 method = sys.argv[3]
 k = int(k)
 
-if 'quickdraw' in dataset_path or 'fashion' in dataset_path:
-    X, info_df, T, CATEGORIES = shared.load_drawings(dataset_path)
-    X = np.array(X).reshape(len(X), -1)  # Flatten images
-else:
-    X, info_df, T, CATEGORIES = shared.load_tabular(dataset_path)
 
-assert k < len(X), 'k larger than N*T.'
-indexes = np.random.choice(len(X), k)
+X, info_df, categories = shared.read_dataset(dataset_path)
+T = len(X)
+N = len(info_df)
+assert k < T * N, 'k larger than N*T.'
+
+X = np.array(X).reshape(T * N, -1)
+indexes = np.random.choice(T * N, k)
 X = X[indexes]
+categories = categories[indexes % N]
 
 assert method in ['TSNE', 'PCA'], 'Invalid method.'
 if method == 'TSNE':
@@ -37,11 +39,12 @@ X_df = pd.DataFrame(X, columns=['x'+str(i) for i in range(X.shape[1])])
 Y_df = pd.DataFrame(Y, columns=['y'+str(i) for i in range(Y.shape[1])])
 df = pd.concat([X_df, Y_df], axis=1)
 
-# plt.scatter(Y[:,0], Y[:,1],c=[int(x) for x in info_df.drawing_cat_id.iloc[indexes]],
-#             s=[10*(x/T) for x in info_df.t.iloc[indexes]], cmap=plt.cm.get_cmap('Set1'));plt.show()
-# plt.scatter(Y[:,0], Y[:,1],c=[ord(x[0]) - 64 - 32 for x in info_df.cat.iloc[indexes]], s=[10*(x/T) for x in info_df.t.iloc[indexes]], cmap=plt.cm.get_cmap('Set1'));plt.show()
-# print(df)
-
 dataset_id = os.path.basename(os.path.dirname(dataset_path))
-out = 'output/{}_{}_{}_{}.csv'.format(dataset_id, 'krandom', str(k), method)
+
+fig, ax = plt.subplots()
+ax.scatter(Y[:,0], Y[:,1], c=categories, cmap=plt.cm.get_cmap('Set1'))
+plt.show()
+fig.savefig('generate-landmarks/output/{}-{}-{}-{}.png'.format(dataset_id, 'krandom', str(k), method))
+
+out = 'generate-landmarks/output/{}-{}-{}-{}.csv'.format(dataset_id, 'krandom', str(k), method)
 df.to_csv(out)

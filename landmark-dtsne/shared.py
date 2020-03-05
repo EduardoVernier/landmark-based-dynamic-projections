@@ -83,6 +83,7 @@ def read_dataset(dataset_dir):
     # Read dataset
     Xs = []
     labels = []
+    categories = []
     if 'quickdraw' in dataset_dir or 'fashion' in dataset_dir or 'faces' in dataset_dir:
         X, info_df, n_revisions, CATEGORIES = load_drawings(dataset_dir + '/')
         N = len(X)

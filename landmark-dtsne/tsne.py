@@ -41,14 +41,14 @@ def Hbeta(D=np.array([]), beta=1.0):
 
     # Compute P-row and corresponding perplexity
     P = np.exp(-D.copy() * beta)
-    sumP = sum(P)
+    sumP = np.maximum(sum(P), 1e-12)
     H = np.log(sumP) + beta * np.sum(D * P) / sumP
     P = P / sumP
     return H, P
 
 def p_given_L_betas(lX, X, beta):
 
-    print("Computing p given X and lX betas...")
+    # print("Computing p given X and lX betas...")
     n, _ = lX.shape
     m, _ = X.shape
 
@@ -62,9 +62,9 @@ def p_given_L_betas(lX, X, beta):
     # Loop over all datapoints
     for i in range(n):
 
-        # Print progress
-        if i % 500 == 0:
-            print("Computing P-values for point %d of %d..." % (i, n))
+        # # Print progress
+        # if i % 500 == 0:
+        #     print("Computing P-values for point %d of %d..." % (i, n))
 
         # Compute the Gaussian kernel and entropy for the current precision
         # Di = D[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))]
@@ -87,7 +87,7 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
         Beta = np.sqrt(1 / beta)
     """
     # Initialize some variables
-    print("Computing pairwise distances...")
+    # print("Computing pairwise distances...")
     (n, d) = X.shape
     # sum_X = np.sum(np.square(X), 1)
     # D = np.add(np.add(-2 * np.dot(X, X.T), sum_X).T, sum_X)
@@ -99,9 +99,9 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
     # Loop over all datapoints
     for i in range(n):
 
-        # Print progress
-        if i % 500 == 0:
-            print("Computing P-values for point %d of %d..." % (i, n))
+        # # Print progress
+        # if i % 500 == 0:
+        #     print("Computing P-values for point %d of %d..." % (i, n))
 
         # Compute the Gaussian kernel and entropy for the current precision
         betamin = -np.inf
@@ -177,7 +177,7 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
     P, X_betas = regular_p(X, 1e-5, perplexity)
     P = P + np.transpose(P)
     P = P / np.sum(P)
-    P = P * 4.  # early exaggeration
+    # P = P * 4.  # early exaggeration
     P = np.maximum(P, 1e-12)
 
     # Compute betas for L
@@ -224,15 +224,35 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         Y = Y - np.tile(np.mean(Y, 0), (n, 1))
 
         # Compute current value of cost function
-        if (iter + 1) % 10 == 0:
+        if (iter + 1) % 100 == 0:
             C = (1 - lmbda) * np.sum(P * np.log(P / Q))
             lC = lmbda * np.sum(lP * np.log(lP / lQ))
             print("Iteration {}: error is local={}  global={}".format(iter + 1, C, lC))
 
-        # Stop lying about P-values
-        if iter == 100:
-            P = P / 4.
-            # lP = lP / 4.  # Points fall outside the convex hull if normal P-values for lP are reestablished -- global exaggeration
+        # # Stop lying about P-values
+        # if iter == 100:
+        #     P = P / 4.
+
+        # xlims = ylims = None
+        # if iter % 50 == 0:
+        #     # Generate image for inspection
+        #     if xlims is None:
+        #         xlims = (min(Y[:,0]), max(Y[:,0]))
+        #         ylims = (min(Y[:,1]), max(Y[:,1]))
+        #
+        #     fig, ax = plt.subplots()
+        #     ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
+        #     ax.set_title(title + '   iter={}'.format(iter))
+        #     max_dist = max(Y[:,0]) - min(Y[:,0])  # bad
+        #     for a, b in zip(lY[np.arange(len(lY))], Y[np.argmax(lP, axis=1)]):
+        #         alpha = np.sqrt(np.linalg.norm([a,b])) / max_dist
+        #         line = lines.Line2D([a[0], b[0]], [a[1], b[1]], lw=1, color='silver', alpha=alpha, axes=ax, zorder=0)
+        #         ax.add_line(line)
+        #     ax.scatter(Y[:, 0], Y[:, 1], 20, categories, cmap=cm.Set3, zorder=2)
+        #     ax.set_aspect('equal')
+        #     ax.set_xlim(xlims)
+        #     ax.set_ylim(ylims)
+        #     plt.show()
 
     return Y, lY, lP
 
@@ -243,7 +263,7 @@ if __name__ == "__main__":
 
     seed = 0
 
-    dataset_id = 'gaussians'
+    dataset_id = 'quickdraw'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -251,31 +271,36 @@ if __name__ == "__main__":
     Xs, labels, categories = shared.read_dataset(dataset_dir)
 
     # Read landmarks
-    df = pd.read_csv('./generate-landmarks/output/{}_krandom_1000_PCA.csv'.format(dataset_id), index_col=0)
+    landmarks_file = './generate-landmarks/output/{}-krandom-100-TSNE.csv'.format(dataset_id)
+    landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
+    df = pd.read_csv(landmarks_file, index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
     perplexity_list = [30]
-    lambda_list = [.5]
+    lambda_list = [.1]
     global_exaggeration_list = [4]
+    max_iter = 500  # 1000 is default
     param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list)
 
     for p, l, ge in param_grid:
-        xlims = ylims = None
+        # xlims = ylims = None
         Y = None
         Ys = []
-        for revision in range(len(Xs)):
-            X = Xs[revision]
-            l_str = '{:1.4f}'.format(l).replace('.', '_')
-            title = '{}-p{}-l{}-ge{}'.format(dataset_id, p, l_str, ge, revision)
-            print(title)
-
-            Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=1000)
+        l_str = '{:1.4f}'.format(l).replace('.', '_')
+        title = '{}-p{}-l{}-ge{}'.format(dataset_id, p, l_str, ge)
+        print(title)
+        print(landmarks_info)
+        for t in range(len(Xs)):
+            X = Xs[t]
+            print('Time: ' + str(t))
+            Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
             Ys.append(Y)
+
             # Generate image for inspection
-            if xlims is None:
-                xlims = (min(Y[:,0]), max(Y[:,0]))
-                ylims = (min(Y[:,1]), max(Y[:,1]))
+            # if xlims is None:
+            #     xlims = (min(Y[:,0]), max(Y[:,0]))
+            #     ylims = (min(Y[:,1]), max(Y[:,1]))
 
             fig, ax = plt.subplots()
             ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
@@ -287,14 +312,16 @@ if __name__ == "__main__":
                 ax.add_line(line)
             ax.scatter(Y[:, 0], Y[:, 1], 20, categories, cmap=cm.Set3, zorder=2)
             ax.set_aspect('equal')
-            ax.set_xlim(xlims)
-            ax.set_ylim(ylims)
+            # ax.set_xlim(xlims)
+            # ax.set_ylim(ylims)
             plt.show()
-            # fig.savefig('./landmark-dtsne/{}.png'.format(title))
+
+            # fig.savefig('./landmark-dtsne/{}-t{}.png'.format(title, t))
+            # # break
 
         df_out = pd.DataFrame(index=labels)
         for t in range(len(Ys)):
             df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
             df_out['t{}d1'.format(t)] = Ys[t].T[1]
 
-        df_out.to_csv('./tests/dynamic-tests/{}.csv'.format(title), index_label='id')
+        df_out.to_csv('./tests/dynamic-tests/{}_{}.csv'.format(title, landmarks_info), index_label='id')
