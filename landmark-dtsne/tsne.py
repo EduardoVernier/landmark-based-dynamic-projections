@@ -47,6 +47,9 @@ def Hbeta(D=np.array([]), beta=1.0):
     return H, P
 
 def p_given_L_betas(lX, X, beta):
+    """
+    Given the precomputed landmark betas, compute p for each pair landmark-projected point
+    """
 
     # print("Computing p given X and lX betas...")
     n, _ = lX.shape
@@ -56,23 +59,14 @@ def p_given_L_betas(lX, X, beta):
 
     D = euclidian_distance(lX, X)
     P = np.zeros((n, m))
-    # beta = np.ones((n, 1))
-    # logU = np.log(perplexity)
 
     # Loop over all datapoints
     for i in range(n):
-
-        # # Print progress
-        # if i % 500 == 0:
-        #     print("Computing P-values for point %d of %d..." % (i, n))
-
         # Compute the Gaussian kernel and entropy for the current precision
-        # Di = D[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))]
         Di = D[i, :]
         (H, thisP) = Hbeta(Di, beta[i])
 
         # Set the final row of P
-        # P[i, np.concatenate((np.r_[0:i], np.r_[i + 1:m]))] = thisP
         P[i, :] = thisP
 
     # Return final P-matrix
@@ -86,11 +80,8 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
         Instead of testing different sigma values, we test different beta values where
         Beta = np.sqrt(1 / beta)
     """
-    # Initialize some variables
     # print("Computing pairwise distances...")
     (n, d) = X.shape
-    # sum_X = np.sum(np.square(X), 1)
-    # D = np.add(np.add(-2 * np.dot(X, X.T), sum_X).T, sum_X)
     D = euclidian_distance(X)
     P = np.zeros((n, n))
     beta = np.ones((n, 1))
@@ -98,11 +89,6 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
 
     # Loop over all datapoints
     for i in range(n):
-
-        # # Print progress
-        # if i % 500 == 0:
-        #     print("Computing P-values for point %d of %d..." % (i, n))
-
         # Compute the Gaussian kernel and entropy for the current precision
         betamin = -np.inf
         betamax = np.inf
@@ -168,10 +154,8 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
     gains = np.ones((n, no_dims))
     if Y_init is None:
         Y = np.random.randn(n, no_dims)
-        first_revision = True
     else:
         Y = Y_init
-        first_revision = False
 
     # Compute P-values and betas for X
     P, X_betas = regular_p(X, 1e-5, perplexity)
@@ -257,13 +241,22 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
     return Y, lY, lP
 
 
+def scale_lY(lY, Y):
+    if np.std(Y[:,0]) > np.std(Y[:,1]):
+        scaling_factor = np.std(Y[:,0]) / np.std(lY[:,1])
+    else:
+        scaling_factor = np.std(Y[:,1]) / np.std(lY[:,0])
+    return (lY - np.mean(lY, axis=0)) * scaling_factor + np.mean(Y, axis=0)
+
+
+
 if __name__ == "__main__":
     print("Run Y = tsne.tsne(X, no_dims, perplexity) to perform t-SNE on your dataset.")
     # print("Running example on 2,500 MNIST digits...")
 
     seed = 0
 
-    dataset_id = 'quickdraw'
+    dataset_id = 'gaussians'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -271,36 +264,39 @@ if __name__ == "__main__":
     Xs, labels, categories = shared.read_dataset(dataset_dir)
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-100-TSNE.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-1000-PCA.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     df = pd.read_csv(landmarks_file, index_col=0)
     lX = df[[c for c in df.columns if c.startswith('x')]].values
     lY = df[[c for c in df.columns if c.startswith('y')]].values
 
     perplexity_list = [30]
-    lambda_list = [.1]
-    global_exaggeration_list = [4]
-    max_iter = 500  # 1000 is default
+    lambda_list = [.0, 0.01, .1, .5, .8, 1.]
+    global_exaggeration_list = [1, 2, 4, 8]
+    max_iter = 1000  # 1000 is default
+    landmark_scaling = True
     param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list)
 
     for p, l, ge in param_grid:
-        # xlims = ylims = None
         Y = None
         Ys = []
         l_str = '{:1.4f}'.format(l).replace('.', '_')
-        title = '{}-p{}-l{}-ge{}'.format(dataset_id, p, l_str, ge)
+        title = '{}-p{}-l{}-ge{}-{}-s{}'.format(dataset_id, p, l_str, ge, landmarks_info, int(landmark_scaling))
         print(title)
         print(landmarks_info)
-        for t in range(len(Xs)):
+        for t in [9]: # range(len(Xs)):
             X = Xs[t]
             print('Time: ' + str(t))
+
+            if t == 9 and landmark_scaling == True:
+                # If landmark scaling is on, estimate the dimensions of the 2D projection and scale landmarks accordingly
+                Y, lY, _ = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
+                lY = scale_lY(lY, Y)
+
+            Y = None
             Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
             Ys.append(Y)
 
-            # Generate image for inspection
-            # if xlims is None:
-            #     xlims = (min(Y[:,0]), max(Y[:,0]))
-            #     ylims = (min(Y[:,1]), max(Y[:,1]))
 
             fig, ax = plt.subplots()
             ax.scatter(lY[:, 0], lY[:, 1], 3, marker='x', c='k', zorder=1)
@@ -316,12 +312,12 @@ if __name__ == "__main__":
             # ax.set_ylim(ylims)
             plt.show()
 
-            # fig.savefig('./landmark-dtsne/{}-t{}.png'.format(title, t))
+            fig.savefig('./landmark-dtsne/{}-t{}.png'.format(title, t))
             # # break
 
-        df_out = pd.DataFrame(index=labels)
-        for t in range(len(Ys)):
-            df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
-            df_out['t{}d1'.format(t)] = Ys[t].T[1]
-
-        df_out.to_csv('./tests/dynamic-tests/{}_{}.csv'.format(title, landmarks_info), index_label='id')
+        # df_out = pd.DataFrame(index=labels)
+        # for t in range(len(Ys)):
+        #     df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
+        #     df_out['t{}d1'.format(t)] = Ys[t].T[1]
+        #
+        # df_out.to_csv('./tests/dynamic-tests/{}-{}.csv'.format(title, landmarks_info), index_label='id')
