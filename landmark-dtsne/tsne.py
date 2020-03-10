@@ -284,11 +284,11 @@ if __name__ == "__main__":
         title = '{}-p{}-l{}-ge{}-{}-s{}'.format(dataset_id, p, l_str, ge, landmarks_info, int(landmark_scaling))
         print(title)
         print(landmarks_info)
-        for t in [9]: # range(len(Xs)):
+        for t in [0]: # range(len(Xs)):
             X = Xs[t]
             print('Time: ' + str(t))
 
-            if t == 9 and landmark_scaling == True:
+            if t == 0 and landmark_scaling == True:
                 # If landmark scaling is on, estimate the dimensions of the 2D projection and scale landmarks accordingly
                 Y, lY, _ = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
                 lY = scale_lY(lY, Y)
