@@ -19,14 +19,14 @@ def get_projection_as_array(path):
 class Projection:
     def __init__(self, path):
         self.name = re.match(r'.*/(.*).csv', path).group(1)
-        pos, self.indices, self.n_timesteps = get_projection_as_array(path)
+        pos, self.indexes, self.n_timesteps = get_projection_as_array(path)
         colormap = matplotlib.cm.Set3
-        self.colors = [colormap(cl) for cl in pd.factorize(self.indices.str.split('-').str[0])[0]]
+        self.colors = [colormap(cl) for cl in pd.factorize(self.indexes.str.split('-').str[0])[0]]
 
-        # # Shuffle arrays
-        # perm = np.random.permutation(len(ind))
-        # pos = pos[perm]
-        # indexes[p] = ind[perm]
+        self.landmarks = []
+        if 'ldtsne' in self.name:
+            landmark_file = 'generate-landmarks/output/' + self.name.split('-')[0] + '-' + '-'.join(self.name.split('-')[5:]) + '.csv'
+            self.landmarks = pd.read_csv(landmark_file, index_col=0).values[:, -2:]
 
         # Set x and y axis limits
         x_max = max(pos[:, :, 0].flatten())
@@ -61,37 +61,56 @@ if __name__ == '__main__':
     for i in range(1, len(sys.argv)):
         projections.append(Projection(sys.argv[i]))
 
-    print(len(projections[0].coords))
+    n_proj = len(projections)
+    if n_proj == 1:
+        fig, axes = plt.subplots(ncols=n_proj, nrows=1, figsize=(n_proj * 5, 5))
+        axes = [axes]
+    elif n_proj < 4:
+        fig, axes = plt.subplots(ncols=n_proj, nrows=1, figsize=(n_proj * 5, 5))
+    else:
+        ncols = 4
+        nrows = (n_proj - 1) // 4 + 1
+        fig, axes = plt.subplots(ncols=ncols, nrows=nrows, figsize=(ncols * 5, nrows * 5))
+        axes = axes.flatten()
 
-    fig, ax = plt.subplots()
-    xdata, ydata = [], []
-    # ln, = plt.plot([], [], 'ro')
+    # Initial draw of projections
+    scatters = []
+    for i, p in enumerate(projections):
+        x = p.coords[0][:, 0]
+        y = p.coords[0][:, 1]
+        c = p.colors
+        s = np.full(len(c), 10)
+        if len(p.landmarks):
+            x = np.append(p.landmarks[:, 0], x)
+            y = np.append(p.landmarks[:, 1], y)
+            s = np.append(np.full(len(p.landmarks), 2), s)
+            for _ in range(len(p.landmarks)):
+                c.insert(0, (1., 1., 1., .3))
 
-
-    scatter = ax.scatter(projections[0].coords[0][:, 0], projections[0].coords[0][:, 1], s=10, edgecolors='#000000', animated=True)
-
-    # if n_proj < 4:
-    #     cls.fig, cls.axes = plt.subplots(ncols=n_proj, nrows=1, figsize=(n_proj * 5, 5))
-    # else:
-    #     ncols = 4
-    #     nrows = (n_proj - 1) // 4 + 1
-    #     cls.fig, cls.axes = plt.subplots(ncols=ncols, nrows=nrows, figsize=(ncols * 5, nrows * 5))
-    #     cls.axes = cls.axes.flatten()
+        scatter = axes[i].scatter(x, y, s=s, animated=True)
+        scatter.set_color(c)
+        scatter.set_edgecolor((.6, .6, .6, 1.))
+        scatter.set_linewidth(.3)
+        scatters.append(scatter)
+        axes[i].set_title(p.name, fontsize=8)
 
 
     def init():
-        ax.set_xlim(projections[0].limits[:2])
-        ax.set_ylim(projections[0].limits[2:])
-        return scatter,
+        for i, p in enumerate(projections):
+            axes[i].set_xlim(p.limits[:2])
+            axes[i].set_ylim(p.limits[2:])
+        return tuple(scatters)
 
     def update(frame):
-        # scatter.set_data(projections[0].coords[frame][:, 0], projections[0].coords[frame][:, 1])
-        scatter.set_offsets(np.vstack((projections[0].coords[frame][:, 0], projections[0].coords[frame][:, 1])).T)
-        scatter.set_color(projections[0].colors)
-        scatter.set_edgecolor('k')
-        scatter.set_linewidth(.3)
-        return scatter,
+        for i, p in enumerate(projections):
+            x = p.coords[frame][:, 0]
+            y = p.coords[frame][:, 1]
+            if len(p.landmarks):
+                x = np.append(p.landmarks[:, 0], x)
+                y = np.append(p.landmarks[:, 1], y)
+            scatters[i].set_offsets(np.vstack((x, y)).T)
+        return tuple(scatters)
 
     ani = FuncAnimation(fig, update, frames=range(len(projections[0].coords)),
-                        init_func=init, interval=1, blit=True, repeat=True)
+                        init_func=init, interval=.1, blit=True, repeat=True)
     plt.show()
