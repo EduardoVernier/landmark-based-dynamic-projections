@@ -8,18 +8,22 @@ import matplotlib.pyplot as plt
 
 import shared
 
-## USAGE: python k_random.py <dataset_path> <k_samples> <method>
-## ../datasets/qtables/ 1000 PCA
+## USAGE: python generate-landmarks/k_random.py <dataset_path> <k_samples> <method>
+## ./datasets/qtables/ 1000 PCA
 
 dataset_path = sys.argv[1]
 k = sys.argv[2]
 method = sys.argv[3]
-k = int(k)
-
 
 X, info_df, categories = shared.read_dataset(dataset_path)
 T = len(X)
 N = len(info_df)
+
+if k == 'n':
+    k = N
+else:
+    k = int(k)
+
 assert k < T * N, 'k larger than N*T.'
 
 X = np.array(X).reshape(T * N, -1)
@@ -43,8 +47,8 @@ dataset_id = os.path.basename(os.path.dirname(dataset_path))
 
 fig, ax = plt.subplots()
 ax.scatter(Y[:,0], Y[:,1], c=categories, cmap=plt.cm.get_cmap('Set1'))
-plt.show()
-fig.savefig('generate-landmarks/output/{}-{}-{}-{}.png'.format(dataset_id, 'krandom', str(k), method))
+# plt.show()
+fig.savefig('generate-landmarks/output/{}-{}-{}-{}.png'.format(dataset_id, 'krandom', sys.argv[2], method))
 
-out = 'generate-landmarks/output/{}-{}-{}-{}.csv'.format(dataset_id, 'krandom', str(k), method)
+out = 'generate-landmarks/output/{}-{}-{}-{}.csv'.format(dataset_id, 'krandom', sys.argv[2], method)
 df.to_csv(out)
