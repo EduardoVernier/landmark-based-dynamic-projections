@@ -122,11 +122,24 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
         P[i, np.concatenate((np.r_[0:i], np.r_[i+1:n]))] = thisP
 
     # Return final P-matrix
-    print("Mean value of sigma: %f" % np.mean(np.sqrt(1 / beta)))
+    # print("Mean value of sigma: %f" % np.mean(np.sqrt(1 / beta)))
     return P, beta
 
 
-def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, global_exaggeration=4, no_dims=2, perplexity=30.0, max_iter=1000):
+def pca(X=np.array([]), no_dims=50):
+    """
+        Runs PCA on the NxD array X in order to reduce its dimensionality to
+        no_dims dimensions.
+    """
+    (n, d) = X.shape
+    X = X - np.tile(np.mean(X, 0), (n, 1))
+    (l, M) = np.linalg.eig(np.dot(X.T, X))
+    Y = np.dot(X, M[:, 0:no_dims])
+    return Y
+
+
+def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, global_exaggeration=4, no_dims=2,
+           perplexity=30.0, max_iter=1000, timestep=0):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
@@ -141,7 +154,7 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         return -1
 
     # Initialize variables
-    # X = pca(X, initial_dims).real
+    # X = pca(X, 2).real
     (n, d) = X.shape
     initial_momentum = 0.5
     final_momentum = 0.8
@@ -151,7 +164,8 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
     if Y_init is None:
-        Y = np.random.randn(n, no_dims)
+        Y = np.random.randn(n, no_dims)  # Random initialization
+        # Y = pca(X, no_dims)  # PCA initialization
     else:
         Y = Y_init
 
@@ -184,12 +198,18 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         lQ = l_num / np.sum(l_num)
         lQ = np.maximum(lQ, 1e-12)
 
+        # Force global influence on the first iterations of the first timestep
+        if timestep == 0 and iter < 100:
+            l = 1
+        else:
+            l = lmbda
+
         # Compute gradient. The second term is what computes "landmark attraction"
         PQ = P - Q
         lPQ = lP - lQ
         for i in range(n):
-            dY[i, :] = (1 - lmbda) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
-                          + lmbda  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - lY), 0)
+            dY[i, :] = (1 - l) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
+                          + l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - lY), 0)
 
         # Perform the update
         if iter < 20:
@@ -205,9 +225,9 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
 
         # Compute current value of cost function
         if (iter + 1) % 100 == 0:
-            C = (1 - lmbda) * np.sum(P * np.log(P / Q))
-            lC = lmbda * np.sum(lP * np.log(lP / lQ))
-            print("Iteration {}: error is local={}  global={}".format(iter + 1, C, lC))
+            C = (1 - l) * np.sum(P * np.log(P / Q))
+            lC = l * np.sum(lP * np.log(lP / lQ))
+            print("Iteration {}: error local={}  global={}".format(iter + 1, C, lC))
 
         # xlims = ylims = None
         # if iter % 50 == 0:
@@ -254,7 +274,7 @@ def save_scaled_landmarks(lY, landmarks_file, timestamp):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'gaussians'
+    dataset_id = 'cartolastd'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -263,39 +283,38 @@ if __name__ == "__main__":
 
     # Params
     perplexity_list = [30]
-    lambda_list = [0.5]  # [.0, 0.01, .1, .5, .8, 1.]
-    global_exaggeration_list = [4]  # [1, 2, 4, 8]
+    lambda_list = [.25]  # [.25, .5, .75]
+    global_exaggeration_list = [4]  # [2, 4, 8]
+    landmark_scaling = [True]
     max_iter = 1000  # 1000 is default
-    landmark_scaling = True
-    param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list)
+    param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list, landmark_scaling)
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-1000-PCA.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-n-PCA.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
-    landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
+    # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)
     lX = df_landmarks[[c for c in df_landmarks.columns if c.startswith('x')]].values
     lY = df_landmarks[[c for c in df_landmarks.columns if c.startswith('y')]].values
 
-    for p, l, ge in param_grid:
+    for p, l, ge, ls in param_grid:
         Y = None
         Ys = []
         l_str = '{:1.4f}'.format(l).replace('.', '_')
         title = '{}-ldtsne-p{}-l{}-ge{}-{}'.format(dataset_id, p, l_str, ge, landmarks_info)
+        timestamp = str(int(time.time()))
         print(title)
-        print(landmarks_info)
         for t in range(len(Xs)):
             X = Xs[t]
-            print('Time: ' + str(t))
-            timestamp = str(int(time.time()))
+            print('Timestep: ' + str(t))
 
             # If landmark scaling is on, estimate the dimensions of the 2D projection and scale landmarks accordingly
-            if t == 0 and landmark_scaling:
-                Y, lY, _ = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
+            if t == 0 and ls:
+                Y, lY, _ = ldtsne(X, Y, lX, lY, lmbda=0., perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter, timestep=-1)
                 lY = scale_lY(lY, Y)
                 Y = None
 
-            Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter)
+            Y, lY, lP = ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter, timestep=t)
             Ys.append(Y)
 
             # Show results
@@ -309,11 +328,9 @@ if __name__ == "__main__":
                 ax.add_line(line)
             ax.scatter(Y[:, 0], Y[:, 1], 20, categories, cmap=cm.Set3, zorder=2)
             ax.set_aspect('equal')
-            # ax.set_xlim(xlims)
-            # ax.set_ylim(ylims)
             plt.show()
-            # fig.savefig('./landmark-dtsne/{}-t{}-{}.png'.format(title, t, timestamp))
-            # # break
+            # fig.savefig('./tests/t/{}-t{}-{}.png'.format(title, t, ls))
+            # break
 
         # Save results
         df_out = pd.DataFrame(index=labels)
@@ -321,8 +338,8 @@ if __name__ == "__main__":
             df_out['t{}d0'.format(t)] = Ys[t].T[0]  # Only doing 2D for now
             df_out['t{}d1'.format(t)] = Ys[t].T[1]
 
-        if landmark_scaling:
-            df_out.to_csv('./tests/dynamic-tests/{}-{}-{}.csv'.format(title, landmarks_info, timestamp), index_label='id')
+        if ls:
+            df_out.to_csv('./tests/dynamic-tests/{}-{}.csv'.format(title, timestamp), index_label='id')
             save_scaled_landmarks(lY, landmarks_file, timestamp)
         else:
-            df_out.to_csv('./tests/dynamic-tests/{}-{}.csv'.format(title, landmarks_info), index_label='id')
+            df_out.to_csv('./tests/dynamic-tests/{}.csv'.format(title), index_label='id')

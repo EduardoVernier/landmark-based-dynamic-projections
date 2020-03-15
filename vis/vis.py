@@ -1,14 +1,16 @@
+import math
 import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from matplotlib.colors import Normalize
 from matplotlib.animation import FuncAnimation
 import sys
 import re
 
+anim_running = True
+anim = None
 
 def get_projection_as_array(path):
     df = pd.read_csv(path, index_col=0)
@@ -39,21 +41,46 @@ class Projection:
         y_min = y_min - (y_max - y_min) * .03
         self.limits = (x_min, x_max, y_min, y_max)
 
-        # Add more points with akima interpolation
-        n_nans = 9
-        pos_int = []
-        for points in pos:
-            extended = []
-            for po in points:
-                extended.append(list(po))
-                for i in range(n_nans):
-                    extended.append([np.nan, np.nan])
-            df = pd.DataFrame(extended)
-            df = df.interpolate(method='akima')
-            df = df.dropna()
-            pos_int.append(df.values)
-        self.coords = np.swapaxes(np.array(pos_int), 0, 1)
+        if self.n_timesteps > 1:
+            # Add more points with akima interpolation
+            n_nans = 9
+            pos_int = []
+            for points in pos:
+                extended = []
+                for po in points:
+                    extended.append(list(po))
+                    for i in range(n_nans):
+                        extended.append([np.nan, np.nan])
+                df = pd.DataFrame(extended)
+                df = df.interpolate(method='akima')
+                df = df.dropna()
+                pos_int.append(df.values)
+            self.coords = np.swapaxes(np.array(pos_int), 0, 1)
+        else:
+            self.coords = np.swapaxes(np.array(pos), 0, 1)
 
+
+def key_press(event):
+    global pause, autopause
+    print('press', event.key)
+    sys.stdout.flush()
+    if event.key == ' ':  # Continue animation with spacebar
+        global anim_running, anim
+        if anim_running:
+            anim.event_source.stop()
+            anim_running = False
+        else:
+            anim.event_source.start()
+            anim_running = True
+    if event.key == '+':
+        if anim.event_source.interval > 0:
+            anim.event_source.interval *= 2
+        else:
+            anim.event_source.interval = 1
+        print(anim.event_source.interval)
+    if event.key == '-':
+        anim.event_source.interval *= .5
+        print(anim.event_source.interval)
 
 if __name__ == '__main__':
 
@@ -61,6 +88,7 @@ if __name__ == '__main__':
     for i in range(1, len(sys.argv)):
         projections.append(Projection(sys.argv[i]))
 
+    n_timesteps = projections[0].n_timesteps
     n_proj = len(projections)
     if n_proj == 1:
         fig, axes = plt.subplots(ncols=n_proj, nrows=1, figsize=(n_proj * 5, 5))
@@ -94,12 +122,14 @@ if __name__ == '__main__':
         scatters.append(scatter)
         axes[i].set_title(p.name, fontsize=8)
 
+    time_text = plt.text(0, 0, '0', fontsize=12, transform=axes[0].transAxes, animated=True)
 
     def init():
         for i, p in enumerate(projections):
             axes[i].set_xlim(p.limits[:2])
             axes[i].set_ylim(p.limits[2:])
-        return tuple(scatters)
+
+        return tuple(scatters + [time_text])
 
     def update(frame):
         for i, p in enumerate(projections):
@@ -109,8 +139,13 @@ if __name__ == '__main__':
                 x = np.append(p.landmarks[:, 0], x)
                 y = np.append(p.landmarks[:, 1], y)
             scatters[i].set_offsets(np.vstack((x, y)).T)
-        return tuple(scatters)
 
-    ani = FuncAnimation(fig, update, frames=range(len(projections[0].coords)),
-                        init_func=init, interval=.1, blit=True, repeat=True)
+        time_text.set_text(str(math.floor(frame/10))[:4])
+        return tuple(scatters + [time_text])
+
+    anim = FuncAnimation(fig, update, frames=range(len(projections[0].coords)),
+                         init_func=init, interval=1., blit=True, repeat=True)
+
+    fig.canvas.mpl_connect('key_press_event', key_press)
+
     plt.show()
