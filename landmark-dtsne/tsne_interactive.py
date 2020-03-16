@@ -13,6 +13,8 @@
 #  Copyright (c) 2008 Tilburg University. All rights reserved.
 
 import itertools
+import sys
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -20,12 +22,15 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import multiprocessing as mp
 import matplotlib.cm as cm
-from matplotlib import lines
 import time
-
-from matplotlib.animation import FuncAnimation
-
 import shared
+
+lmbda = mp.Value('d', .0)
+global_exaggeration = mp.Value('i', 1)
+local_exaggeration = mp.Value('i', 1)
+t = mp.Value('i', 0)
+# https://docs.python.org/3/library/multiprocessing.shared_memory.html#module-multiprocessing.shared_memory
+lock = mp.Lock()
 
 
 def euclidian_distance(X, Y=None):
@@ -50,6 +55,7 @@ def Hbeta(D=np.array([]), beta=1.0):
     H = np.log(sumP) + beta * np.sum(D * P) / sumP
     P = P / sumP
     return H, P
+
 
 def p_given_L_betas(lX, X, beta):
     """
@@ -131,20 +137,9 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
     return P, beta
 
 
-def pca(X=np.array([]), no_dims=50):
-    """
-        Runs PCA on the NxD array X in order to reduce its dimensionality to
-        no_dims dimensions.
-    """
-    (n, d) = X.shape
-    X = X - np.tile(np.mean(X, 0), (n, 1))
-    (l, M) = np.linalg.eig(np.dot(X.T, X))
-    Y = np.dot(X, M[:, 0:no_dims])
-    return Y
 
-
-def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=.01, global_exaggeration=4, no_dims=2,
-           perplexity=30.0, max_iter=1000, timestep=0, plotter=None):
+def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), no_dims=2,
+           perplexity=30.0, max_iter=1000, plotter=None):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
@@ -158,41 +153,44 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         print("Error: number of dimensions should be an integer.")
         return -1
 
+    global global_exaggeration, local_exaggeration, lmbda
     # Initialize variables
     # X = pca(X, 2).real
+    X = Xs[0]
     (n, d) = X.shape
     initial_momentum = 0.5
     final_momentum = 0.8
-    eta = 500  # original value was 500
+    eta = 1  # original value was 500
     min_gain = 0.01
     dY = np.zeros((n, no_dims))
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
     if Y_init is None:
         Y = np.random.randn(n, no_dims)  # Random initialization
-        # Y = pca(X, no_dims)  # PCA initialization
     else:
         Y = Y_init
 
-    # Compute P-values and betas for X
-    P, X_betas = regular_p(X, 1e-5, perplexity)
-    P = P + np.transpose(P)
-    P = P / np.sum(P)
-    # P = P * 4.  # early exaggeration
-    P = np.maximum(P, 1e-12)
+    # Precompute P and lP for all timesteps
+    _, L_betas = regular_p(lX, 1e-5, perplexity)  # Compute betas for L
+    Ps = []
+    lPs = []
+    for X in Xs:
+        # Compute P-values and betas for X
+        P, _ = regular_p(X, 1e-5, perplexity)
+        P = P + np.transpose(P)
+        P = P / np.sum(P)
+        # P = P * 4.  # early exaggeration
+        P = np.maximum(P, 1e-12)
+        Ps.append(P)
 
-    # Compute betas for L
-    _, L_betas = regular_p(lX, 1e-5, perplexity)
-
-    # Compute P-matrix between X and L with previously computed beta values
-    lP = p_given_L_betas(lX, X, L_betas)
-    lP = lP / np.sum(lP)
-    lP = lP * global_exaggeration  # early exaggeration (forever?) -- if we remove it the points won't fall inside the convex hull
-    lP = np.maximum(lP, 1e-12)
+        # Compute P-matrix between X and L with previously computed beta values
+        lP = p_given_L_betas(lX, X, L_betas)
+        lP = lP / np.sum(lP)
+        lP = np.maximum(lP, 1e-12)
+        lPs.append(lP)
 
     # Run iterations
     for iter in range(max_iter):
-
         # Compute pairwise affinities
         num = 1 / (1 + euclidian_distance(Y))
         num[range(n), range(n)] = 0.
@@ -205,14 +203,11 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         lQ = np.maximum(lQ, 1e-12)
 
         # Force global influence on the first iterations of the first timestep
-        if timestep == 0 and iter < 100:
-            l = 1
-        else:
-            l = lmbda
+        l = lmbda.value
 
         # Compute gradient. The second term is what computes "landmark attraction"
-        PQ = P - Q
-        lPQ = lP - lQ
+        PQ = local_exaggeration.value * Ps[t.value] - Q
+        lPQ = global_exaggeration.value * lPs[t.value] - lQ
         for i in range(n):
             dY[i, :] = (1 - l) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
                           + l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - lY), 0)
@@ -230,38 +225,23 @@ def ldtsne(X=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), lmbda=
         Y = Y - np.tile(np.mean(Y, 0), (n, 1))
 
         # Compute current value of cost function
-        if (iter + 1) % 100 == 0:
-            C = (1 - l) * np.sum(P * np.log(P / Q))
-            lC = l * np.sum(lP * np.log(lP / lQ))
-            print("Iteration {}: error local={}  global={}".format(iter + 1, C, lC))
+        # if (iter + 1) % 3 == 0:
+            # C = (1 - l) * np.sum(P * np.log(P / Q))
+            # lC = l * np.sum(lP * np.log(lP / lQ))
+            # print("Iteration {}: error local={}  global={}".format(iter + 1, C, lC))
 
-        pl.plot((Y, iter))
+        plotter.plot((Y, iter))
         time.sleep(.1)
 
 
-def scale_lY(lY, Y):
-    """
-        Make std dev of landmarks match the std dev of the first iteration of dtsne in the largest dimension.
-    """
-    if np.std(Y[:, 0]) > np.std(Y[:, 1]):
-        scaling_factor = np.std(Y[:, 0]) / np.std(lY[:, 1])
-    else:
-        scaling_factor = np.std(Y[:, 1]) / np.std(lY[:, 0])
-    return (lY - np.mean(lY, axis=0)) * scaling_factor + np.mean(Y, axis=0)
-
-
-def save_scaled_landmarks(lY, landmarks_file, timestamp):
-    df_landmarks = pd.read_csv(landmarks_file, index_col=0)
-    df_landmarks['y0'] = lY[:, 0]
-    df_landmarks['y1'] = lY[:, 1]
-    landmarks_file = landmarks_file.replace('.csv', '-' + timestamp + '.csv')
-    df_landmarks.to_csv(landmarks_file)
-
-
 class ProcessPlotter(object):
-    def __init__(self, n_points, colors):
+    def __init__(self, n_points, colors, landmarks):
+        self.landmarks = landmarks
         self.n_points = n_points
-        self.colors = colors
+        colormap = matplotlib.cm.Set1
+        self.colors = [colormap(cl) for cl in colors]
+        for _ in range(len(landmarks)):
+            self.colors.insert(0, (1., 1., 1., .3))
 
     def terminate(self):
         plt.close('all')
@@ -274,12 +254,21 @@ class ProcessPlotter(object):
                 return False
             else:
                 pts, iter = command
-                xmin, ymin = pts.min(axis=0)
-                xmax, ymax = pts.max(axis=0)
-                self.ax.set_xlim(xmin, xmax)
-                self.ax.set_ylim(ymin, ymax)
-                self.ax.set_title(iter)
-                self.scatter.set_offsets(np.vstack((pts[:, 0], pts[:, 1])).T)
+                title = 'iter={}  lambda={:.2f}  ge={}  le={}  t={}'.format(iter, lmbda.value, global_exaggeration.value, local_exaggeration.value, t.value)
+                self.ax.set_title(title)
+                x = np.append(self.landmarks[:, 0], pts[:, 0])
+                y = np.append(self.landmarks[:, 1], pts[:, 1])
+                self.scatter.set_offsets(np.vstack((x, y)).T)
+                x_min = x.min()
+                x_max = x.max()
+                y_min = y.min()
+                y_max = y.max()
+                x_max = x_max + (x_max - x_min) * .03
+                x_min = x_min - (x_max - x_min) * .03
+                y_max = y_max + (y_max - y_min) * .03
+                y_min = y_min - (y_max - y_min) * .03
+                self.ax.set_xlim(x_min, x_max)
+                self.ax.set_ylim(y_min, y_max)
         self.fig.canvas.draw()
         return True
 
@@ -289,19 +278,69 @@ class ProcessPlotter(object):
         self.fig, self.ax = plt.subplots()
         timer = self.fig.canvas.new_timer(interval=0)
 
-        Y = np.random.randn(self.n_points, 2)  # Random initialization
-        self.scatter = self.ax.scatter(Y[:, 0], Y[:, 1], s=10, c=self.colors, cmap=cm.Set3)
+        R = np.random.randn(self.n_points, 2)  # Random initialization
+        x = np.append(self.landmarks[:, 0], R[:, 0])
+        y = np.append(self.landmarks[:, 1], R[:, 1])
+        self.scatter = self.ax.scatter(x, y, s=25, c=self.colors, cmap=cm.Set3)
+        self.scatter.set_edgecolor((.6, .6, .6, 1.))
+        self.scatter.set_linewidth(.3)
+        self.fig.canvas.mpl_connect('key_press_event', self.key_press)
 
         timer.add_callback(self.call_back)
         timer.start()
         print('...done')
         plt.show()
 
+    def key_press(self, event):
+        print('press', event.key)
+        sys.stdout.flush()
+        global global_exaggeration, local_exaggeration, lmbda
+        if event.key == '1':
+            lock.acquire()
+            lmbda.value = max(0., lmbda.value - 0.1)
+            print('Lambda: ', lmbda.value)
+            lock.release()
+        if event.key == '2':
+            lock.acquire()
+            lmbda.value = min(1., lmbda.value + 0.1)
+            print('Lambda: ', lmbda.value)
+            lock.release()
+        if event.key == '3':
+            lock.acquire()
+            global_exaggeration.value = max(0, global_exaggeration.value - 1)
+            print('Global Exaggeration: ', global_exaggeration.value)
+            lock.release()
+        if event.key == '4':
+            lock.acquire()
+            global_exaggeration.value = min(16, global_exaggeration.value + 1)
+            print('Global Exaggeration: ', global_exaggeration.value)
+            lock.release()
+        if event.key == '5':
+            lock.acquire()
+            local_exaggeration.value = max(0, local_exaggeration.value - 1)
+            print('Local Exaggeration: ', local_exaggeration.value)
+            lock.release()
+        if event.key == '6':
+            lock.acquire()
+            local_exaggeration.value = min(16, local_exaggeration.value + 1)
+            print('Local Exaggeration: ', local_exaggeration.value)
+            lock.release()
+        if event.key == '9':
+            lock.acquire()
+            t.value = max(0, t.value - 1)
+            print('t: ', t.value)
+            lock.release()
+        if event.key == '0':
+            lock.acquire()
+            t.value += 1
+            print('t: ', t.value)
+            lock.release()
+
 
 class NBPlot(object):
-    def __init__(self, n_points, colors):
+    def __init__(self, n_points, colors, landmarks):
         self.plot_pipe, plotter_pipe = mp.Pipe()
-        self.plotter = ProcessPlotter(n_points, colors)
+        self.plotter = ProcessPlotter(n_points, colors, landmarks)
         self.plot_process = mp.Process(target=self.plotter, args=(plotter_pipe,), daemon=True)
         self.plot_process.start()
 
@@ -320,31 +359,25 @@ if __name__ == "__main__":
     Xs, labels, categories = shared.read_dataset(dataset_dir)
 
     # Params
-    perplexity_list = [30]
-    lambda_list = [.0]  # [.25, .5, .75]
-    global_exaggeration_list = [4]  # [2, 4, 8]
-    landmark_scaling = [False]
-    max_iter = 1000  # 1000 is default
-    param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list, landmark_scaling)
+    p = 30
+    landmark_scaling = False
+    max_iter = 100000  # 1000 is default
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-n-PCA.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-n-TSNE.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)
     lX = df_landmarks[[c for c in df_landmarks.columns if c.startswith('x')]].values
     lY = df_landmarks[[c for c in df_landmarks.columns if c.startswith('y')]].values
 
-    pl = NBPlot(len(Xs[0]), categories)
+    pl = NBPlot(len(Xs[0]), categories, lY)
 
-    for p, l, ge, ls in param_grid:
-        Y = None
-        Ys = []
-        l_str = '{:1.4f}'.format(l).replace('.', '_')
-        title = '{}-ldtsne-p{}-l{}-ge{}-{}'.format(dataset_id, p, l_str, ge, landmarks_info)
-        timestamp = str(int(time.time()))
-        print(title)
-        for t in [0]:
-            X = Xs[t]
-            print('Timestep: ' + str(t))
-            ldtsne(X, Y, lX, lY, lmbda=l, perplexity=p, global_exaggeration=ge, no_dims=2, max_iter=max_iter, timestep=t, plotter=pl)
+    Y = None
+    Ys = []
+    # l_str = '{:1.4f}'.format(lmbda).replace('.', '_')
+    # title = '{}-ldtsne-p{}-l{}-ge{}-{}'.format(dataset_id, p, l_str, global_exaggeration, landmarks_info)
+    # timestamp = str(int(time.time()))
+    # print(title)
+
+    ldtsne(Xs, Y, lX, lY, perplexity=p, no_dims=2, max_iter=max_iter, plotter=pl)
