@@ -27,7 +27,7 @@ class Projection:
 
         self.landmarks = []
         if 'ldtsne' in self.name:
-            landmark_file = 'generate-landmarks/output/' + self.name.split('-')[0] + '-' + '-'.join(self.name.split('-')[5:]) + '.csv'
+            landmark_file = 'generate-landmarks/output/' + self.name.split('-')[0] + '-' + self.name[self.name.find('krandom'):] + '.csv'
             self.landmarks = pd.read_csv(landmark_file, index_col=0).values[:, -2:]
 
         # Set x and y axis limits

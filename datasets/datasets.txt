@@ -1,0 +1,11 @@
+minigaussians
+cartolastd
+cifar10cnn
+esc50
+fashion
+gaussians
+nnset
+qtables
+quickdraw
+sorts
+walk

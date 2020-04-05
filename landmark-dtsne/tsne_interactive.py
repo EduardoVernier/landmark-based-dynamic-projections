@@ -14,9 +14,11 @@
 
 import itertools
 import sys
+from numba import jit
 
 import numpy as np
 import pandas as pd
+from natsort import natsorted
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
@@ -25,10 +27,13 @@ import matplotlib.cm as cm
 import time
 import shared
 
-lmbda = mp.Value('d', .0)
+# Shared variables
+lmbda = mp.Value('d', .1)
+landmark_scale = mp.Value('d', 1.)
 global_exaggeration = mp.Value('i', 1)
 local_exaggeration = mp.Value('i', 1)
 t = mp.Value('i', 0)
+save_state = mp.Value('i', False)
 # https://docs.python.org/3/library/multiprocessing.shared_memory.html#module-multiprocessing.shared_memory
 lock = mp.Lock()
 
@@ -137,34 +142,26 @@ def regular_p(X=np.array([]), tol=1e-5, perplexity=30.0):
     return P, beta
 
 
-
-def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), no_dims=2,
-           perplexity=30.0, max_iter=1000, plotter=None):
+def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]),
+           perplexity=30.0, max_iter=1000, title='', plotter=None, index=np.array([])):
     """
         Runs t-SNE on the dataset in the NxD array X to reduce its
         dimensionality to no_dims dimensions. The syntaxis of the function is
         `Y = tsne.tsne(X, no_dims, perplexity), where X is an NxD NumPy array.
     """
-    # Check inputs
-    if isinstance(no_dims, float):
-        print("Error: array X should have type float.")
-        return -1
-    if round(no_dims) != no_dims:
-        print("Error: number of dimensions should be an integer.")
-        return -1
-
-    global global_exaggeration, local_exaggeration, lmbda
+    global global_exaggeration, local_exaggeration, lmbda, landmark_scale
     # Initialize variables
-    # X = pca(X, 2).real
     X = Xs[0]
     (n, d) = X.shape
-    initial_momentum = 0.5
-    final_momentum = 0.8
+    momentum = 0.5
     eta = 1  # original value was 500
     min_gain = 0.01
+
+    no_dims = 2
     dY = np.zeros((n, no_dims))
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
+    df_out = pd.DataFrame(index=index)
     if Y_init is None:
         Y = np.random.randn(n, no_dims)  # Random initialization
     else:
@@ -190,33 +187,28 @@ def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), no_di
         lPs.append(lP)
 
     # Run iterations
-    for iter in range(max_iter):
-        # Compute pairwise affinities
+    for iter in range(max_iter):        # Compute pairwise affinities
         num = 1 / (1 + euclidian_distance(Y))
         num[range(n), range(n)] = 0.
         Q = num / np.sum(num)
         Q = np.maximum(Q, 1e-12)
 
+        scaled_lY = (lY - np.mean(lY, axis=0)) * landmark_scale.value + np.mean(lY, axis=0)
         # Compute pairwise affinities between Y and lY (projected landmarks)
-        l_num = 1 / (1 + euclidian_distance(lY, Y))
+        l_num = 1 / (1 + euclidian_distance(scaled_lY, Y))
         lQ = l_num / np.sum(l_num)
         lQ = np.maximum(lQ, 1e-12)
 
-        # Force global influence on the first iterations of the first timestep
-        l = lmbda.value
 
+        l = lmbda.value
         # Compute gradient. The second term is what computes "landmark attraction"
         PQ = local_exaggeration.value * Ps[t.value] - Q
         lPQ = global_exaggeration.value * lPs[t.value] - lQ
         for i in range(n):
             dY[i, :] = (1 - l) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
-                          + l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - lY), 0)
+                          + l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - scaled_lY), 0)
 
         # Perform the update
-        if iter < 20:
-            momentum = initial_momentum
-        else:
-            momentum = final_momentum
         gains = (gains + 0.2) * ((dY > 0.) != (iY > 0.)) + \
                 (gains * 0.8) * ((dY > 0.) == (iY > 0.))
         gains[gains < min_gain] = min_gain
@@ -224,14 +216,18 @@ def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]), no_di
         Y = Y + iY
         Y = Y - np.tile(np.mean(Y, 0), (n, 1))
 
-        # Compute current value of cost function
-        # if (iter + 1) % 3 == 0:
-            # C = (1 - l) * np.sum(P * np.log(P / Q))
-            # lC = l * np.sum(lP * np.log(lP / lQ))
-            # print("Iteration {}: error local={}  global={}".format(iter + 1, C, lC))
-
         plotter.plot((Y, iter))
-        time.sleep(.1)
+        time.sleep(.005)
+
+        if save_state.value:
+            # Save results
+            df_out['t{}d0'.format(t.value)] = Y.T[0]  # Only doing 2D for now
+            df_out['t{}d1'.format(t.value)] = Y.T[1]
+            df_out = df_out.reindex(natsorted(df_out.columns), axis=1)
+            df_out.to_csv('./tests/dynamic-tests/{}.csv'.format(title), index_label='id')
+            lock.acquire()
+            save_state.value = False
+            lock.release()
 
 
 class ProcessPlotter(object):
@@ -254,10 +250,12 @@ class ProcessPlotter(object):
                 return False
             else:
                 pts, iter = command
-                title = 'iter={}  lambda={:.2f}  ge={}  le={}  t={}'.format(iter, lmbda.value, global_exaggeration.value, local_exaggeration.value, t.value)
+                title = 'iter={}  lambda={:.2f}  ge={}  le={}  ls={:.2f}  t={}'.format(iter, lmbda.value, global_exaggeration.value, local_exaggeration.value, landmark_scale.value, t.value)
                 self.ax.set_title(title)
-                x = np.append(self.landmarks[:, 0], pts[:, 0])
-                y = np.append(self.landmarks[:, 1], pts[:, 1])
+                lY = self.landmarks
+                scaled_lY = (lY - np.mean(lY, axis=0)) * landmark_scale.value + np.mean(lY, axis=0)
+                x = np.append(scaled_lY[:, 0], pts[:, 0])
+                y = np.append(scaled_lY[:, 1], pts[:, 1])
                 self.scatter.set_offsets(np.vstack((x, y)).T)
                 x_min = x.min()
                 x_max = x.max()
@@ -295,16 +293,18 @@ class ProcessPlotter(object):
         print('press', event.key)
         sys.stdout.flush()
         global global_exaggeration, local_exaggeration, lmbda
+
         if event.key == '1':
             lock.acquire()
-            lmbda.value = max(0., lmbda.value - 0.1)
+            lmbda.value *= 0.9
             print('Lambda: ', lmbda.value)
             lock.release()
         if event.key == '2':
             lock.acquire()
-            lmbda.value = min(1., lmbda.value + 0.1)
+            lmbda.value *= 1.1
             print('Lambda: ', lmbda.value)
             lock.release()
+
         if event.key == '3':
             lock.acquire()
             global_exaggeration.value = max(0, global_exaggeration.value - 1)
@@ -315,6 +315,7 @@ class ProcessPlotter(object):
             global_exaggeration.value = min(16, global_exaggeration.value + 1)
             print('Global Exaggeration: ', global_exaggeration.value)
             lock.release()
+
         if event.key == '5':
             lock.acquire()
             local_exaggeration.value = max(0, local_exaggeration.value - 1)
@@ -325,6 +326,18 @@ class ProcessPlotter(object):
             local_exaggeration.value = min(16, local_exaggeration.value + 1)
             print('Local Exaggeration: ', local_exaggeration.value)
             lock.release()
+
+        if event.key == '7':
+            lock.acquire()
+            landmark_scale.value *= 0.9
+            print('Landmarks scaled by: ', landmark_scale.value)
+            lock.release()
+        if event.key == '8':
+            lock.acquire()
+            landmark_scale.value *= 1.1
+            print('Landmarks scaled by: ', landmark_scale.value)
+            lock.release()
+
         if event.key == '9':
             lock.acquire()
             t.value = max(0, t.value - 1)
@@ -334,6 +347,11 @@ class ProcessPlotter(object):
             lock.acquire()
             t.value += 1
             print('t: ', t.value)
+            lock.release()
+        if event.key == 'w':
+            lock.acquire()
+            save_state.value = True
+            print('Save current state - t: ', t.value)
             lock.release()
 
 
@@ -351,7 +369,7 @@ class NBPlot(object):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'minigaussians'
+    dataset_id = 'sorts'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -364,7 +382,7 @@ if __name__ == "__main__":
     max_iter = 100000  # 1000 is default
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-n-TSNE.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-n-PCA.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)
@@ -375,9 +393,8 @@ if __name__ == "__main__":
 
     Y = None
     Ys = []
-    # l_str = '{:1.4f}'.format(lmbda).replace('.', '_')
-    # title = '{}-ldtsne-p{}-l{}-ge{}-{}'.format(dataset_id, p, l_str, global_exaggeration, landmarks_info)
+    title = '{}-ldtsne-p{}--interactive-{}'.format(dataset_id, p, landmarks_info)
     # timestamp = str(int(time.time()))
     # print(title)
 
-    ldtsne(Xs, Y, lX, lY, perplexity=p, no_dims=2, max_iter=max_iter, plotter=pl)
+    ldtsne(Xs, Y, lX, lY, perplexity=p, max_iter=max_iter, title=title, plotter=pl, index=labels)
