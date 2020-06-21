@@ -19,12 +19,15 @@ X, info_df, categories = shared.read_dataset(dataset_path)
 T = len(X)
 N = len(info_df)
 
-if k == 'n':
+
+if k == 'nt':
+    k = N * T
+elif k == 'n':
     k = N
 else:
     k = int(k)
 
-assert k < T * N, 'k larger than N*T.'
+assert k <= T * N, 'k larger than N*T.'
 
 X = np.array(X).reshape(T * N, -1)
 indexes = np.random.choice(T * N, k)

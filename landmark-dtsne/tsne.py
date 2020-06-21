@@ -269,7 +269,7 @@ def save_scaled_landmarks(lY, landmarks_file, timestamp):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'quickdraw'
+    dataset_id = 'sorts'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -279,15 +279,15 @@ if __name__ == "__main__":
     # Params
     initialization = None # {'l': .6, 'ge': 8, 'le': 8}
     perplexity_list = [30]
-    lambda_list = [.1]  # [.25, .5, .75]
-    global_exaggeration_list = [2]  # [2, 4, 8]
-    local_exageration_list = [1]
-    landmark_scaling = [.25]
-    max_iter = 500  # 1000 is default
+    lambda_list = [.25]  # [.25, .5, .75]
+    global_exaggeration_list = [10, 50]  # [2, 4, 8]
+    local_exageration_list = [2]
+    landmark_scaling = [1]
+    max_iter = 50  # 1000 is default
     param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list, local_exageration_list, landmark_scaling)
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-n-TSNE.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-nt-PCA.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)

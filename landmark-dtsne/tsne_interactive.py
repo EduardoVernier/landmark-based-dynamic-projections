@@ -28,10 +28,11 @@ import time
 import shared
 
 # Shared variables
-lmbda = mp.Value('d', .1)
+lmbda = mp.Value('d', .0)
 landmark_scale = mp.Value('d', 1.)
-global_exaggeration = mp.Value('i', 1)
-local_exaggeration = mp.Value('i', 1)
+vector_size = mp.Value('d', .002)
+global_exaggeration = mp.Value('d', 1)
+local_exaggeration = mp.Value('d', 1)
 t = mp.Value('i', 0)
 save_state = mp.Value('i', False)
 # https://docs.python.org/3/library/multiprocessing.shared_memory.html#module-multiprocessing.shared_memory
@@ -159,6 +160,8 @@ def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]),
 
     no_dims = 2
     dY = np.zeros((n, no_dims))
+    dY_local = np.zeros((n, no_dims))
+    dY_global = np.zeros((n, no_dims))
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
     df_out = pd.DataFrame(index=index)
@@ -202,21 +205,23 @@ def ldtsne(Xs=np.array([]), Y_init=None, lX=np.array([]), lY=np.array([]),
 
         l = lmbda.value
         # Compute gradient. The second term is what computes "landmark attraction"
-        PQ = local_exaggeration.value * Ps[t.value] - Q
-        lPQ = global_exaggeration.value * lPs[t.value] - lQ
-        for i in range(n):
-            dY[i, :] = (1 - l) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0) \
-                          + l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - scaled_lY), 0)
+        if t.value < len(Xs):
+            PQ = local_exaggeration.value * Ps[t.value] - Q
+            lPQ = global_exaggeration.value * lPs[t.value] - lQ
+            for i in range(n):
+                dY_local[i, :] = (1 - l) * np.sum(np.tile( PQ[:, i] *   num[:, i], (no_dims, 1)).T * (Y[i, :] - Y), 0)
+                dY_global[i, :] = l  * np.sum(np.tile(lPQ[:, i] * l_num[:, i], (no_dims, 1)).T * (Y[i, :] - scaled_lY), 0)
+                dY[i, :] = dY_local[i, :] + dY_global[i, :]
 
-        # Perform the update
-        gains = (gains + 0.2) * ((dY > 0.) != (iY > 0.)) + \
-                (gains * 0.8) * ((dY > 0.) == (iY > 0.))
-        gains[gains < min_gain] = min_gain
-        iY = momentum * iY - eta * (gains * dY)
-        Y = Y + iY
-        Y = Y - np.tile(np.mean(Y, 0), (n, 1))
+            # Perform the update
+            gains = (gains + 0.2) * ((dY > 0.) != (iY > 0.)) + \
+                    (gains * 0.8) * ((dY > 0.) == (iY > 0.))
+            gains[gains < min_gain] = min_gain
+            iY = momentum * iY - eta * (gains * dY)
+            Y = Y + iY
+            Y = Y - np.tile(np.mean(Y, 0), (n, 1))
 
-        plotter.plot((Y, iter))
+        plotter.plot((Y, dY_local, dY_global, iter))
         time.sleep(.005)
 
         if save_state.value:
@@ -249,14 +254,26 @@ class ProcessPlotter(object):
                 self.terminate()
                 return False
             else:
-                pts, iter = command
-                title = 'iter={}  lambda={:.2f}  ge={}  le={}  ls={:.2f}  t={}'.format(iter, lmbda.value, global_exaggeration.value, local_exaggeration.value, landmark_scale.value, t.value)
+                pts, dY_local, dY_global, iter = command
+                title = 'iter={}  lambda={:.2f}  ge={:.2f}  le={:.2f}  ls={:.2f}  t={}'.format(iter, lmbda.value, global_exaggeration.value, local_exaggeration.value, landmark_scale.value, t.value)
                 self.ax.set_title(title)
                 lY = self.landmarks
                 scaled_lY = (lY - np.mean(lY, axis=0)) * landmark_scale.value + np.mean(lY, axis=0)
                 x = np.append(scaled_lY[:, 0], pts[:, 0])
                 y = np.append(scaled_lY[:, 1], pts[:, 1])
                 self.scatter.set_offsets(np.vstack((x, y)).T)
+
+                self.quiver_local.set_offsets(np.vstack((pts[:, 0], pts[:, 1])).T)
+                self.quiver_local.U = -dY_local[:, 0]
+                self.quiver_local.V = -dY_local[:, 1]
+                self.quiver_local.scale = vector_size.value
+
+
+                self.quiver_global.set_offsets(np.vstack((pts[:, 0], pts[:, 1])).T)
+                self.quiver_global.U = -dY_global[:, 0]
+                self.quiver_global.V = -dY_global[:, 1]
+                self.quiver_global.scale = vector_size.value
+
                 x_min = x.min()
                 x_max = x.max()
                 y_min = y.min()
@@ -279,11 +296,20 @@ class ProcessPlotter(object):
         R = np.random.randn(self.n_points, 2)  # Random initialization
         x = np.append(self.landmarks[:, 0], R[:, 0])
         y = np.append(self.landmarks[:, 1], R[:, 1])
-        self.scatter = self.ax.scatter(x, y, s=25, c=self.colors, cmap=cm.Set3)
+        self.scatter = self.ax.scatter(x, y, s=25, c=self.colors, cmap=cm.Set3, zorder=100)
         self.scatter.set_edgecolor((.6, .6, .6, 1.))
         self.scatter.set_linewidth(.3)
-        self.fig.canvas.mpl_connect('key_press_event', self.key_press)
 
+        X, Y = R[:, 0], R[:, 1]
+        U = np.ones_like(X)
+        V = np.ones_like(X)
+        # self.quiver_local = self.ax.quiver(X, Y, U, V, units='xy', scale=.001, color='r')
+        # self.quiver_global = self.ax.quiver(X, Y, U, V, units='xy', scale=.001, color='b')
+        self.quiver_local = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='r')
+        self.quiver_global = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='b')
+
+
+        self.fig.canvas.mpl_connect('key_press_event', self.key_press)
         timer.add_callback(self.call_back)
         timer.start()
         print('...done')
@@ -296,34 +322,34 @@ class ProcessPlotter(object):
 
         if event.key == '1':
             lock.acquire()
-            lmbda.value *= 0.9
+            lmbda.value = max(0, lmbda.value - .05)
             print('Lambda: ', lmbda.value)
             lock.release()
         if event.key == '2':
             lock.acquire()
-            lmbda.value *= 1.1
+            lmbda.value = min(1, lmbda.value + .05)
             print('Lambda: ', lmbda.value)
             lock.release()
 
         if event.key == '3':
             lock.acquire()
-            global_exaggeration.value = max(0, global_exaggeration.value - 1)
+            global_exaggeration.value *= 0.9 # max(0, global_exaggeration.value - 1)
             print('Global Exaggeration: ', global_exaggeration.value)
             lock.release()
         if event.key == '4':
             lock.acquire()
-            global_exaggeration.value = min(16, global_exaggeration.value + 1)
+            global_exaggeration.value *= 1.1  # min(16, global_exaggeration.value + 1)
             print('Global Exaggeration: ', global_exaggeration.value)
             lock.release()
 
         if event.key == '5':
             lock.acquire()
-            local_exaggeration.value = max(0, local_exaggeration.value - 1)
+            local_exaggeration.value *= 0.9  # max(0, local_exaggeration.value - 1)
             print('Local Exaggeration: ', local_exaggeration.value)
             lock.release()
         if event.key == '6':
             lock.acquire()
-            local_exaggeration.value = min(16, local_exaggeration.value + 1)
+            local_exaggeration.value *= 1.1  # min(16, local_exaggeration.value + 1)
             print('Local Exaggeration: ', local_exaggeration.value)
             lock.release()
 
@@ -348,10 +374,22 @@ class ProcessPlotter(object):
             t.value += 1
             print('t: ', t.value)
             lock.release()
+
         if event.key == 'w':
             lock.acquire()
             save_state.value = True
             print('Save current state - t: ', t.value)
+            lock.release()
+
+        if event.key == 'n':
+            lock.acquire()
+            vector_size.value *= 1.1
+            print('vector_size scaled by: ', vector_size.value)
+            lock.release()
+        if event.key == 'm':
+            lock.acquire()
+            vector_size.value *= .9
+            print('vector_size scaled by: ', vector_size.value)
             lock.release()
 
 
@@ -382,7 +420,7 @@ if __name__ == "__main__":
     max_iter = 100000  # 1000 is default
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-n-PCA.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-nt-PCA.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)
