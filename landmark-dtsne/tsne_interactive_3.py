@@ -32,6 +32,7 @@ from sklearn.decomposition import PCA
 lmbda = mp.Value('d', .0)
 landmark_scale = mp.Value('d', 1.)
 vector_size = mp.Value('d', .002)
+show_vectors = mp.Value('d', .0)
 global_exaggeration = mp.Value('d', 1)
 local_exaggeration = mp.Value('d', 1)
 t = mp.Value('i', 0)
@@ -247,7 +248,7 @@ class ProcessPlotter(object):
         colormap = matplotlib.cm.Set1
         self.colors = [colormap(cl) for cl in colors]
         for _ in range(len(landmarks)):
-            self.colors.insert(0, (1., 1., 1., .3))
+            self.colors.insert(0, (1., 1., 1., .1))
 
     def terminate(self):
         plt.close('all')
@@ -269,15 +270,16 @@ class ProcessPlotter(object):
                 self.scatter.set_offsets(np.vstack((x, y)).T)
 
                 self.quiver_local.set_offsets(np.vstack((pts[:, 0], pts[:, 1])).T)
+                self.quiver_local.set_alpha(show_vectors.value * .3)
+                self.quiver_local.scale = vector_size.value
                 self.quiver_local.U = -dY_local[:, 0]
                 self.quiver_local.V = -dY_local[:, 1]
-                self.quiver_local.scale = 10e10 #vector_size.value
-
 
                 self.quiver_global.set_offsets(np.vstack((pts[:, 0], pts[:, 1])).T)
+                self.quiver_global.set_alpha(show_vectors.value * .3)
+                self.quiver_global.scale = vector_size.value
                 self.quiver_global.U = -dY_global[:, 0]
                 self.quiver_global.V = -dY_global[:, 1]
-                self.quiver_global.scale = 10e10 # vector_size.value
 
                 x_min = x.min()
                 x_max = x.max()
@@ -310,8 +312,8 @@ class ProcessPlotter(object):
         V = np.ones_like(X)
         # self.quiver_local = self.ax.quiver(X, Y, U, V, units='xy', scale=.001, color='r')
         # self.quiver_global = self.ax.quiver(X, Y, U, V, units='xy', scale=.001, color='b')
-        self.quiver_local = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='r')
-        self.quiver_global = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='b')
+        self.quiver_local = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='r', alpha=show_vectors.value)
+        self.quiver_global = self.ax.quiver(X, Y, U, V, units='width', scale=vector_size.value, color='b', alpha=show_vectors.value)
 
 
         self.fig.canvas.mpl_connect('key_press_event', self.key_press)
@@ -386,6 +388,11 @@ class ProcessPlotter(object):
             print('Save current state - t: ', t.value)
             lock.release()
 
+        if event.key == 'b':
+            lock.acquire()
+            show_vectors.value = float(not(bool(show_vectors.value)))
+            print('show_vector: ', show_vectors.value)
+            lock.release()
         if event.key == 'n':
             lock.acquire()
             vector_size.value *= 1.1
