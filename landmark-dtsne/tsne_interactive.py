@@ -407,7 +407,7 @@ class NBPlot(object):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'sorts'
+    dataset_id = 'gaussians'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
@@ -420,7 +420,7 @@ if __name__ == "__main__":
     max_iter = 100000  # 1000 is default
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-nt-PCA.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-krandom-100-TSNE.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)
