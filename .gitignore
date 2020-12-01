@@ -3,3 +3,4 @@
 **/.ipynb_checkpoints/*
 datasets/*/
 tests/dynamic-tests/*
+plots/trails/*
