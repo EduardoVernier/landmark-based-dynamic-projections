@@ -275,19 +275,20 @@ if __name__ == "__main__":
 
     # Read dataset
     Xs, labels, categories = shared.read_dataset(dataset_dir)
+    Xs = [Xs[0]]
 
     # Params
     initialization = None # {'l': .6, 'ge': 8, 'le': 8}
     perplexity_list = [30]
-    lambda_list = [.05, .25, .5]
-    global_exaggeration_list = [1, 4, 8, 16]  # [2, 4, 8]
-    local_exageration_list = [2, 4]
-    landmark_scaling = [.1, 1]
+    lambda_list = [.25, .5]
+    global_exaggeration_list = [2, 4, 8]  # [2, 4, 8]
+    local_exageration_list = [1]
+    landmark_scaling = [1, 10]
     max_iter = 100  # 1000 is default
     param_grid = itertools.product(perplexity_list, lambda_list, global_exaggeration_list, local_exageration_list, landmark_scaling)
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-100-TSNE.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-row-n-!.csv'.format(dataset_id)
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)

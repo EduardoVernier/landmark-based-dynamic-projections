@@ -153,7 +153,7 @@ def ldtsne(X=np.array([]), Y_init=None, lY=np.array([]), initialization_setup=No
     no_dims = 2
     momentum = 0.5
     eta = 1  # original value was 500
-    min_gain = 0.01
+    min_gain = 0.0001 # original values was 0.01
     dY = np.zeros((n, no_dims))
     iY = np.zeros((n, no_dims))
     gains = np.ones((n, no_dims))
@@ -263,9 +263,9 @@ if __name__ == "__main__":
     # Params
     initialization = None # {'l': .6, 'ge': 8, 'le': 8}
     perplexity_list = [30]
-    lambda_list = [.0001, .001, .01]  # [.25, .5, .75]
+    lambda_list = [0, .000001, .00001, .0001, .001, .01]  # [.25, .5, .75]
     local_exageration_list = [1]
-    landmark_scaling = [.1, 1., 10.]
+    landmark_scaling = [1.]
     max_iter = 200  # 1000 is default
     param_grid = itertools.product(perplexity_list, lambda_list, local_exageration_list, landmark_scaling)
 
@@ -280,7 +280,11 @@ if __name__ == "__main__":
         ls_str = '{:.2f}'.format(ls).replace('.', '_')
         title = '{}-pcadtsne-p{}-l{}-le{}-ls{}'.format(dataset_id, p, l_str, le, ls_str)
         timestamp = str(int(time.time()))
+        import glob
         print(title)
+        if (title + '.csv' in [t.split('/')[-1] for t in glob.glob('./tests/lambda_tests/*')]):
+            continue
+
         for t in range(len(Xs)):
             print('Timestep: ' + str(t))
 

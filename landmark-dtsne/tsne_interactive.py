@@ -283,7 +283,7 @@ class ProcessPlotter(object):
                 y_max = y_max + (y_max - y_min) * .03
                 y_min = y_min - (y_max - y_min) * .03
                 self.ax.set_xlim(x_min, x_max)
-                self.ax.set_ylim(y_min, y_max)
+                self.ax.set_ylim(-2.5, 2.5)
         self.fig.canvas.draw()
         return True
 
@@ -297,7 +297,7 @@ class ProcessPlotter(object):
         x = np.append(self.landmarks[:, 0], R[:, 0])
         y = np.append(self.landmarks[:, 1], R[:, 1])
         self.scatter = self.ax.scatter(x, y, s=25, c=self.colors, cmap=cm.Set3, zorder=100)
-        self.scatter.set_edgecolor((.6, .6, .6, 1.))
+        self.scatter.set_edgecolor((.6, .6, .6, .6))
         self.scatter.set_linewidth(.3)
 
         X, Y = R[:, 0], R[:, 1]
@@ -407,12 +407,13 @@ class NBPlot(object):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'gaussians'
+    dataset_id = 'minigaussians'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
     # Read dataset
     Xs, labels, categories = shared.read_dataset(dataset_dir)
+    Xs = [Xs[0], Xs[2], Xs[4], Xs[6]]
 
     # Params
     p = 30
@@ -420,7 +421,9 @@ if __name__ == "__main__":
     max_iter = 100000  # 1000 is default
 
     # Read landmarks
-    landmarks_file = './generate-landmarks/output/{}-krandom-100-TSNE.csv'.format(dataset_id)
+    landmarks_file = './generate-landmarks/output/{}-row-n-!.csv'.format(dataset_id)
+    # landmarks_file = './generate-landmarks/output/{}-krandom-nt-PCA.csv'.format(dataset_id)
+
     landmarks_info = landmarks_file.split('/')[-1].split('-', 1)[1][:-4]
     # landmarks_info = landmarks_info + '-ls' + str(int(landmark_scaling))
     df_landmarks = pd.read_csv(landmarks_file, index_col=0)

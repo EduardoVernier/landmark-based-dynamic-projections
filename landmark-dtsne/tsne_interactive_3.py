@@ -248,7 +248,7 @@ class ProcessPlotter(object):
         colormap = matplotlib.cm.Set1
         self.colors = [colormap(cl) for cl in colors]
         for _ in range(len(landmarks)):
-            self.colors.insert(0, (1., 1., 1., .1))
+            self.colors.insert(0, (.9, .9, .9, 1))
 
     def terminate(self):
         plt.close('all')
@@ -304,8 +304,8 @@ class ProcessPlotter(object):
         x = np.append(self.landmarks[:, 0], R[:, 0])
         y = np.append(self.landmarks[:, 1], R[:, 1])
         self.scatter = self.ax.scatter(x, y, s=25, c=self.colors, cmap=cm.Set3, zorder=100)
-        self.scatter.set_edgecolor((.6, .6, .6, 1.))
-        self.scatter.set_linewidth(.3)
+        self.scatter.set_edgecolor((.8, .8, .8, 1.))
+        self.scatter.set_linewidth(.1)
 
         X, Y = R[:, 0], R[:, 1]
         U = np.ones_like(X)
@@ -334,7 +334,7 @@ class ProcessPlotter(object):
             lock.release()
         if event.key == '2':
             lock.acquire()
-            lmbda.value = min(1, lmbda.value + .0001)
+            lmbda.value = min(1, lmbda.value + .1)
             print('Lambda: ', lmbda.value)
             lock.release()
 
@@ -419,12 +419,13 @@ class NBPlot(object):
 
 if __name__ == "__main__":
     np.random.seed(0)
-    dataset_id = 'minigaussians'
+    dataset_id = 'sorts'
     dataset_dir = './datasets/{}/'.format(dataset_id)
     print(dataset_id)
 
     # Read dataset
     Xs, labels, categories = shared.read_dataset(dataset_dir)
+    # Xs = [Xs[0]] ### Just to speed up drawing
 
     # Params
     p = 30
